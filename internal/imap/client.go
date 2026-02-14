@@ -3,6 +3,7 @@ package imap
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/emersion/go-imap/v2"
@@ -582,7 +583,5 @@ func formatAddress(addr imap.Address) string {
 }
 
 func readAll(r imap.LiteralReader) ([]byte, error) {
-	data := make([]byte, r.Size())
-	_, err := r.Read(data)
-	return data, err
+	return io.ReadAll(r)
 }

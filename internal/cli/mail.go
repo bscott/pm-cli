@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"html"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/bscott/pm-cli/internal/imap"
@@ -178,11 +180,19 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 
 	// Parse and display body
 	if len(msg.RawBody) > 0 {
-		textBody, _ := parseMessageBody(msg.RawBody)
+		textBody, htmlBody := parseMessageBody(msg.RawBody)
 		if textBody != "" {
 			fmt.Println(textBody)
+		} else if htmlBody != "" {
+			// Convert HTML to plain text
+			text := htmlToText(htmlBody)
+			if text != "" {
+				fmt.Println(text)
+			} else {
+				fmt.Println("[HTML content - use --raw to view]")
+			}
 		} else {
-			fmt.Println("[No text body available]")
+			fmt.Println("[No body content]")
 		}
 	}
 
@@ -446,6 +456,12 @@ func parseMessageBody(rawBody []byte) (textBody, htmlBody string) {
 	}
 	defer reader.Close()
 
+	// Check the top-level content type for single-part messages
+	header := reader.Header
+	contentType := header.Get("Content-Type")
+
+	// Try to iterate through parts (for multipart messages)
+	foundParts := false
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
@@ -454,16 +470,17 @@ func parseMessageBody(rawBody []byte) (textBody, htmlBody string) {
 		if err != nil {
 			break
 		}
+		foundParts = true
 
-		contentType := part.Header.Get("Content-Type")
+		partContentType := part.Header.Get("Content-Type")
 
 		switch {
-		case strings.HasPrefix(contentType, "text/plain"):
+		case strings.HasPrefix(partContentType, "text/plain"):
 			body, err := io.ReadAll(part.Body)
 			if err == nil {
 				textBody = string(body)
 			}
-		case strings.HasPrefix(contentType, "text/html"):
+		case strings.HasPrefix(partContentType, "text/html"):
 			body, err := io.ReadAll(part.Body)
 			if err == nil {
 				htmlBody = string(body)
@@ -471,5 +488,63 @@ func parseMessageBody(rawBody []byte) (textBody, htmlBody string) {
 		}
 	}
 
+	// Handle single-part messages (no parts found)
+	if !foundParts {
+		// Find body after headers (double newline)
+		rawStr := string(rawBody)
+		if idx := strings.Index(rawStr, "\r\n\r\n"); idx != -1 {
+			body := rawStr[idx+4:]
+			if strings.HasPrefix(contentType, "text/html") {
+				htmlBody = body
+			} else {
+				textBody = body
+			}
+		} else if idx := strings.Index(rawStr, "\n\n"); idx != -1 {
+			body := rawStr[idx+2:]
+			if strings.HasPrefix(contentType, "text/html") {
+				htmlBody = body
+			} else {
+				textBody = body
+			}
+		}
+	}
+
 	return textBody, htmlBody
+}
+
+// htmlToText converts HTML to plain text by stripping tags and decoding entities
+func htmlToText(htmlContent string) string {
+	// Remove style and script blocks
+	reStyle := regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	reScript := regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	text := reStyle.ReplaceAllString(htmlContent, "")
+	text = reScript.ReplaceAllString(text, "")
+
+	// Replace common block elements with newlines
+	reBlock := regexp.MustCompile(`(?i)</(p|div|tr|li|h[1-6])>`)
+	text = reBlock.ReplaceAllString(text, "\n")
+
+	// Replace <br> with newlines
+	reBr := regexp.MustCompile(`(?i)<br\s*/?>`)
+	text = reBr.ReplaceAllString(text, "\n")
+
+	// Extract link URLs
+	reLink := regexp.MustCompile(`(?i)<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*)</a>`)
+	text = reLink.ReplaceAllString(text, "$2 [$1]")
+
+	// Remove all remaining HTML tags
+	reTags := regexp.MustCompile(`<[^>]+>`)
+	text = reTags.ReplaceAllString(text, "")
+
+	// Decode HTML entities
+	text = html.UnescapeString(text)
+
+	// Clean up whitespace
+	reSpaces := regexp.MustCompile(`[ \t]+`)
+	text = reSpaces.ReplaceAllString(text, " ")
+
+	reNewlines := regexp.MustCompile(`\n{3,}`)
+	text = reNewlines.ReplaceAllString(text, "\n\n")
+
+	return strings.TrimSpace(text)
 }
