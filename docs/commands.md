@@ -176,17 +176,35 @@ pm-cli mail send [flags]
 **Flags:**
 | Flag | Description | Required |
 |------|-------------|----------|
-| `-t, --to` | Recipient(s) | Yes |
+| `-t, --to` | Recipient(s) | No* |
 | `--cc` | CC recipients | No |
 | `--bcc` | BCC recipients | No |
-| `-s, --subject` | Subject line | Yes |
+| `-s, --subject` | Subject line | No* |
 | `-b, --body` | Body text | No* |
 | `-a, --attach` | Attachments | No |
+| `--template` | Template file path | No |
+| `-V` | Template variables (key=value) | No |
 | `--idempotency-key` | Unique key to prevent duplicate sends | No |
 
-*Body can be provided via stdin if not specified.
+*Required unless provided via template. Body can also be provided via stdin.
 
 **Idempotency:** Use `--idempotency-key` to prevent duplicate emails when retrying failed operations. Keys are valid for 24 hours.
+
+**Templates:** Use `--template` to load email content from a template file. Templates use YAML frontmatter for headers (to, cc, bcc, subject) and the rest is the body. Use `-V key=value` to substitute `{{key}}` placeholders.
+
+**Template Format:**
+```yaml
+---
+to: {{recipient}}
+cc: manager@example.com
+subject: Weekly Report - {{date}}
+---
+Hi {{name}},
+
+Here is the weekly report for {{date}}.
+
+Best regards
+```
 
 **Examples:**
 ```bash
@@ -197,6 +215,12 @@ pm-cli mail send -t a@example.com -t b@example.com -s "Group email" -b "Hi all"
 
 # With idempotency key (for AI agents)
 pm-cli mail send -t user@example.com -s "Order confirmation" --idempotency-key "order-12345"
+
+# Using templates
+pm-cli mail send --template report.tmpl -V recipient=user@example.com -V name=John -V date=2024-01-15
+
+# Template with command-line override (--to overrides template's to)
+pm-cli mail send --template newsletter.tmpl -t override@example.com
 ```
 
 ### mail reply
@@ -443,6 +467,53 @@ pm-cli mail draft delete 42
 pm-cli mail draft delete 42 43 44
 ```
 
+### mail watch
+
+Watch a mailbox for new messages.
+
+```bash
+pm-cli mail watch [flags]
+```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --mailbox` | Mailbox to watch | INBOX |
+| `-i, --interval` | Poll interval in seconds | 30 |
+| `--unread` | Only notify for unread messages | true |
+| `-e, --exec` | Command to execute on new mail (use {} for message ID) | |
+| `--once` | Exit after first new message | false |
+
+**Examples:**
+```bash
+# Watch INBOX with default settings
+pm-cli mail watch
+
+# Watch Sent folder every 60 seconds
+pm-cli mail watch -m Sent -i 60
+
+# Execute a command when new mail arrives
+pm-cli mail watch -e "notify-send 'New mail' 'Message ID: {}'"
+
+# Wait for one new message then exit
+pm-cli mail watch --once
+
+# Watch with JSON output (for scripts/agents)
+pm-cli mail watch --json
+
+# Notify and read the new message
+pm-cli mail watch -e "pm-cli mail read {}"
+```
+
+The watch command:
+- Polls the mailbox at regular intervals
+- Tracks message UIDs to detect new arrivals
+- Optionally executes a command with the message ID substituted for `{}`
+- Handles Ctrl+C gracefully for clean shutdown
+- Supports JSON output for integration with scripts and AI agents
+
+---
+
 ### mail thread
 
 Show conversation thread for a message.
@@ -468,6 +539,91 @@ The thread command:
 - Matches by subject (with Re:/Fwd: prefixes stripped)
 - Displays messages in chronological order
 - Shows body text (truncated) for each message
+
+---
+
+### mail label
+
+Manage message labels. Proton Mail labels are exposed via Bridge as IMAP folders under `Labels/`.
+
+**How it works:**
+- Labels appear as folders under `Labels/` (e.g., `Labels/Important`, `Labels/Work`)
+- Adding a label copies the message to the label folder
+- Removing a label deletes the message from the label folder (but keeps it in INBOX/Archive)
+- Create new labels in the Proton Mail web interface or mobile app
+
+#### mail label list
+
+List all available labels.
+
+```bash
+pm-cli mail label list
+pm-cli mail label list --json
+```
+
+#### mail label add
+
+Add a label to message(s).
+
+```bash
+pm-cli mail label add <id>... [flags]
+```
+
+**Flags:**
+| Flag | Description | Required |
+|------|-------------|----------|
+| `-l, --label` | Label name to add | Yes |
+| `-m, --mailbox` | Source mailbox | No (default: INBOX) |
+
+**Examples:**
+```bash
+# Add a single label
+pm-cli mail label add 123 -l Important
+
+# Add label to multiple messages
+pm-cli mail label add 123 456 789 -l "Work/Projects"
+
+# Add label to a message in a different mailbox
+pm-cli mail label add 123 -l Todo -m Archive
+```
+
+#### mail label remove
+
+Remove a label from message(s).
+
+```bash
+pm-cli mail label remove <id>... [flags]
+```
+
+**Flags:**
+| Flag | Description | Required |
+|------|-------------|----------|
+| `-l, --label` | Label name to remove | Yes |
+
+**Important:** The message IDs must be from within the label folder itself. To find the correct IDs, first list messages in the label folder:
+
+```bash
+pm-cli mail list -m "Labels/Important"
+```
+
+Then use those IDs to remove the label:
+
+```bash
+pm-cli mail label remove 5 -l Important
+```
+
+**Examples:**
+```bash
+# Remove a label
+pm-cli mail label remove 123 -l Important
+
+# Remove label from multiple messages
+pm-cli mail label remove 123 456 -l Todo
+```
+
+**Limitations:**
+- Labels must be created in the Proton Mail web/mobile interface (IMAP folder creation under Labels/ is not supported by Bridge)
+- IMAP keywords (X-Keywords header) are not synchronized by Bridge - only folder-based labels work
 
 ---
 
@@ -509,6 +665,70 @@ pm-cli mailbox delete <name>
 **Examples:**
 ```bash
 pm-cli mailbox delete "Old Folder"
+```
+
+---
+
+## contacts
+
+Address book management. Contacts are stored locally in `~/.config/pm-cli/contacts.json`.
+
+### contacts list
+
+List all contacts in the address book.
+
+```bash
+pm-cli contacts list
+pm-cli contacts list --json
+```
+
+### contacts search
+
+Search contacts by name or email.
+
+```bash
+pm-cli contacts search <query>
+```
+
+**Examples:**
+```bash
+pm-cli contacts search john
+pm-cli contacts search example.com
+pm-cli contacts search "John Doe" --json
+```
+
+### contacts add
+
+Add a contact to the address book.
+
+```bash
+pm-cli contacts add <email> [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-n, --name` | Contact display name |
+
+**Examples:**
+```bash
+pm-cli contacts add user@example.com
+pm-cli contacts add user@example.com --name "John Doe"
+pm-cli contacts add user@example.com -n "Jane Smith"
+```
+
+### contacts remove
+
+Remove a contact from the address book.
+
+```bash
+pm-cli contacts remove <email>
+```
+
+**Examples:**
+```bash
+pm-cli contacts remove user@example.com
+pm-cli contacts remove user@example.com --json
 ```
 
 ---

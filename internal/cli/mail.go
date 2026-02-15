@@ -7,13 +7,18 @@ import (
 	"html"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/bscott/pm-cli/internal/imap"
 	"github.com/bscott/pm-cli/internal/smtp"
 	"github.com/emersion/go-message/mail"
+	"gopkg.in/yaml.v3"
 )
 
 func (c *MailListCmd) Run(ctx *Context) error {
@@ -285,9 +290,40 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		}
 	}
 
+	// Initialize from command-line flags
+	to := c.To
+	cc := c.CC
+	bcc := c.BCC
+	subject := c.Subject
 	body := c.Body
+
+	// Process template if provided
+	if c.Template != "" {
+		tmpl, err := parseEmailTemplate(c.Template, c.Vars)
+		if err != nil {
+			return fmt.Errorf("template error: %w", err)
+		}
+
+		// Template values are used as defaults; command-line flags override
+		if len(to) == 0 && len(tmpl.To) > 0 {
+			to = tmpl.To
+		}
+		if len(cc) == 0 && len(tmpl.CC) > 0 {
+			cc = tmpl.CC
+		}
+		if len(bcc) == 0 && len(tmpl.BCC) > 0 {
+			bcc = tmpl.BCC
+		}
+		if subject == "" && tmpl.Subject != "" {
+			subject = tmpl.Subject
+		}
+		if body == "" && tmpl.Body != "" {
+			body = tmpl.Body
+		}
+	}
+
+	// Read body from stdin if not provided
 	if body == "" {
-		// Read from stdin
 		stat, _ := os.Stdin.Stat()
 		if (stat.Mode() & os.ModeCharDevice) == 0 {
 			scanner := bufio.NewScanner(os.Stdin)
@@ -299,8 +335,15 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		}
 	}
 
+	// Validate required fields
+	if len(to) == 0 {
+		return fmt.Errorf("no recipients specified - use --to or provide in template")
+	}
+	if subject == "" {
+		return fmt.Errorf("no subject specified - use --subject or provide in template")
+	}
 	if body == "" {
-		return fmt.Errorf("no message body provided - use --body or pipe via stdin")
+		return fmt.Errorf("no message body provided - use --body, --template, or pipe via stdin")
 	}
 
 	password, err := ctx.Config.GetPassword()
@@ -312,15 +355,15 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 
 	msg := &smtp.Message{
 		From:        ctx.Config.Bridge.Email,
-		To:          c.To,
-		CC:          c.CC,
-		BCC:         c.BCC,
-		Subject:     c.Subject,
+		To:          to,
+		CC:          cc,
+		BCC:         bcc,
+		Subject:     subject,
 		Body:        body,
 		Attachments: c.Attach,
 	}
 
-	ctx.Formatter.Verbosef("Sending email to %s...", strings.Join(c.To, ", "))
+	ctx.Formatter.Verbosef("Sending email to %s...", strings.Join(to, ", "))
 
 	if err := smtpClient.Send(msg); err != nil {
 		return err
@@ -338,17 +381,110 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		result := map[string]interface{}{
 			"success": true,
 			"message": "Email sent successfully",
-			"to":      c.To,
-			"subject": c.Subject,
+			"to":      to,
+			"subject": subject,
 		}
 		if c.IdempotencyKey != "" {
 			result["idempotency_key"] = c.IdempotencyKey
+		}
+		if c.Template != "" {
+			result["template"] = c.Template
 		}
 		return ctx.Formatter.PrintJSON(result)
 	}
 
 	fmt.Println("Email sent successfully.")
 	return nil
+}
+
+// emailTemplate represents parsed template content.
+type emailTemplate struct {
+	To      []string
+	CC      []string
+	BCC     []string
+	Subject string
+	Body    string
+}
+
+// templateFrontmatter represents the YAML frontmatter structure.
+type templateFrontmatter struct {
+	To      interface{} `yaml:"to"`
+	CC      interface{} `yaml:"cc"`
+	BCC     interface{} `yaml:"bcc"`
+	Subject string      `yaml:"subject"`
+}
+
+// parseEmailTemplate reads and parses an email template file, replacing variables.
+func parseEmailTemplate(templatePath string, vars map[string]string) (*emailTemplate, error) {
+	content, err := os.ReadFile(templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read template: %w", err)
+	}
+
+	// Replace {{variable}} placeholders with values from vars
+	tmplContent := string(content)
+	for key, value := range vars {
+		placeholder := "{{" + key + "}}"
+		tmplContent = strings.ReplaceAll(tmplContent, placeholder, value)
+	}
+
+	// Parse YAML frontmatter (between --- delimiters)
+	tmpl := &emailTemplate{}
+
+	if !strings.HasPrefix(tmplContent, "---") {
+		// No frontmatter, entire content is body
+		tmpl.Body = strings.TrimSpace(tmplContent)
+		return tmpl, nil
+	}
+
+	// Find the end of frontmatter
+	parts := strings.SplitN(tmplContent, "---", 3)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("invalid template format: missing closing --- for frontmatter")
+	}
+
+	frontmatterYAML := parts[1]
+	bodyContent := strings.TrimSpace(parts[2])
+
+	// Parse frontmatter
+	var fm templateFrontmatter
+	if err := yaml.Unmarshal([]byte(frontmatterYAML), &fm); err != nil {
+		return nil, fmt.Errorf("failed to parse template frontmatter: %w", err)
+	}
+
+	// Handle 'to' field which can be string or list
+	tmpl.To = parseRecipientField(fm.To)
+	tmpl.CC = parseRecipientField(fm.CC)
+	tmpl.BCC = parseRecipientField(fm.BCC)
+	tmpl.Subject = fm.Subject
+	tmpl.Body = bodyContent
+
+	return tmpl, nil
+}
+
+// parseRecipientField handles recipient fields that can be string or []string.
+func parseRecipientField(field interface{}) []string {
+	if field == nil {
+		return nil
+	}
+
+	switch v := field.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	case []interface{}:
+		var result []string
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 func (c *MailDeleteCmd) Run(ctx *Context) error {
@@ -1539,6 +1675,151 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+func (c *MailWatchCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	// Track seen UIDs
+	seenUIDs := make(map[uint32]bool)
+
+	// Initial population of seen UIDs
+	if err := c.populateSeenUIDs(ctx, seenUIDs); err != nil {
+		return fmt.Errorf("failed to get initial messages: %w", err)
+	}
+
+	ctx.Formatter.Verbosef("Watching %s for new messages (poll interval: %ds)", c.Mailbox, c.Interval)
+
+	if !ctx.Formatter.JSON {
+		fmt.Printf("Watching %s for new messages (Ctrl+C to stop)...\n", c.Mailbox)
+	}
+
+	ticker := time.NewTicker(time.Duration(c.Interval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-sigChan:
+			if !ctx.Formatter.JSON {
+				fmt.Println("\nStopped watching.")
+			}
+			return nil
+
+		case <-ticker.C:
+			newMessages, err := c.checkForNewMessages(ctx, seenUIDs)
+			if err != nil {
+				ctx.Formatter.Verbosef("Error checking messages: %v", err)
+				continue
+			}
+
+			for _, msg := range newMessages {
+				// Skip read messages if --unread is set
+				if c.Unread && msg.Seen {
+					continue
+				}
+
+				// Mark as seen for future polls
+				seenUIDs[msg.UID] = true
+
+				// Output the new message
+				if ctx.Formatter.JSON {
+					ctx.Formatter.PrintJSON(map[string]interface{}{
+						"event":   "new_message",
+						"mailbox": c.Mailbox,
+						"message": msg,
+					})
+				} else {
+					fmt.Printf("\n[NEW] %s\n", msg.Date)
+					fmt.Printf("  From:    %s\n", msg.From)
+					fmt.Printf("  Subject: %s\n", msg.Subject)
+					fmt.Printf("  ID:      %d\n", msg.SeqNum)
+				}
+
+				// Execute command if specified
+				if c.Exec != "" {
+					c.executeCommand(ctx, msg)
+				}
+
+				// Exit after first message if --once is set
+				if c.Once {
+					return nil
+				}
+			}
+		}
+	}
+}
+
+func (c *MailWatchCmd) populateSeenUIDs(ctx *Context, seenUIDs map[uint32]bool) error {
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	// Get existing messages (reasonable limit)
+	messages, err := client.ListMessages(c.Mailbox, 100, 0, false)
+	if err != nil {
+		return err
+	}
+
+	for _, msg := range messages {
+		seenUIDs[msg.UID] = true
+	}
+
+	return nil
+}
+
+func (c *MailWatchCmd) checkForNewMessages(ctx *Context, seenUIDs map[uint32]bool) ([]imap.MessageSummary, error) {
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := client.Connect(); err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	// Get recent messages
+	messages, err := client.ListMessages(c.Mailbox, 50, 0, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var newMessages []imap.MessageSummary
+	for _, msg := range messages {
+		if !seenUIDs[msg.UID] {
+			newMessages = append(newMessages, msg)
+		}
+	}
+
+	return newMessages, nil
+}
+
+func (c *MailWatchCmd) executeCommand(ctx *Context, msg imap.MessageSummary) {
+	// Replace {} with the message ID
+	cmdStr := strings.Replace(c.Exec, "{}", fmt.Sprintf("%d", msg.SeqNum), -1)
+
+	ctx.Formatter.Verbosef("Executing: %s", cmdStr)
+
+	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		ctx.Formatter.Verbosef("Command failed: %v", err)
+	}
 }
 
 func (c *MailThreadCmd) Run(ctx *Context) error {

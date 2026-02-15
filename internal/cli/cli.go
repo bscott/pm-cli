@@ -18,10 +18,11 @@ type Globals struct {
 type CLI struct {
 	Globals
 
-	Config  ConfigCmd  `cmd:"" help:"Configuration management"`
-	Mail    MailCmd    `cmd:"" help:"Email operations"`
-	Mailbox MailboxCmd `cmd:"" help:"Mailbox management"`
-	Version VersionCmd `cmd:"" help:"Show version information"`
+	Config   ConfigCmd   `cmd:"" help:"Configuration management"`
+	Mail     MailCmd     `cmd:"" help:"Email operations"`
+	Mailbox  MailboxCmd  `cmd:"" help:"Mailbox management"`
+	Contacts ContactsCmd `cmd:"" help:"Address book management"`
+	Version  VersionCmd  `cmd:"" help:"Show version information"`
 }
 
 type Context struct {
@@ -89,6 +90,36 @@ type MailCmd struct {
 	Download MailDownloadCmd `cmd:"" help:"Download attachment"`
 	Draft    DraftCmd        `cmd:"" help:"Manage drafts"`
 	Thread   MailThreadCmd   `cmd:"" help:"Show conversation thread"`
+	Watch    MailWatchCmd    `cmd:"" help:"Watch for new messages"`
+	Label    LabelCmd        `cmd:"" help:"Manage message labels"`
+}
+
+// LabelCmd handles label management
+type LabelCmd struct {
+	List   LabelListCmd   `cmd:"" help:"List available labels"`
+	Add    LabelAddCmd    `cmd:"" help:"Add label to message(s)"`
+	Remove LabelRemoveCmd `cmd:"" help:"Remove label from message(s)"`
+}
+
+type LabelListCmd struct{}
+
+type LabelAddCmd struct {
+	IDs     []string `arg:"" help:"Message ID(s) to label"`
+	Label   string   `help:"Label name to add" short:"l" required:""`
+	Mailbox string   `help:"Source mailbox" short:"m" default:"INBOX"`
+}
+
+type LabelRemoveCmd struct {
+	IDs   []string `arg:"" help:"Message ID(s) to unlabel"`
+	Label string   `help:"Label name to remove" short:"l" required:""`
+}
+
+type MailWatchCmd struct {
+	Mailbox  string `help:"Mailbox to watch" short:"m" default:"INBOX"`
+	Interval int    `help:"Poll interval in seconds" short:"i" default:"30"`
+	Unread   bool   `help:"Only notify for unread messages" default:"true"`
+	Exec     string `help:"Command to execute on new mail (use {} for message ID)" short:"e"`
+	Once     bool   `help:"Exit after first new message"`
 }
 
 type MailThreadCmd struct {
@@ -146,13 +177,15 @@ type MailReadCmd struct {
 }
 
 type MailSendCmd struct {
-	To             []string `help:"Recipient(s)" short:"t" required:""`
-	CC             []string `help:"CC recipients"`
-	BCC            []string `help:"BCC recipients"`
-	Subject        string   `help:"Subject line" short:"s" required:""`
-	Body           string   `help:"Body text (or use stdin)" short:"b"`
-	Attach         []string `help:"Attachments" short:"a" type:"existingfile"`
-	IdempotencyKey string   `help:"Unique key to prevent duplicate sends" name:"idempotency-key"`
+	To             []string          `help:"Recipient(s)" short:"t"`
+	CC             []string          `help:"CC recipients"`
+	BCC            []string          `help:"BCC recipients"`
+	Subject        string            `help:"Subject line" short:"s"`
+	Body           string            `help:"Body text (or use stdin)" short:"b"`
+	Attach         []string          `help:"Attachments" short:"a" type:"existingfile"`
+	IdempotencyKey string            `help:"Unique key to prevent duplicate sends" name:"idempotency-key"`
+	Template       string            `help:"Template file path" name:"template" type:"existingfile"`
+	Vars           map[string]string `help:"Template variables (key=value)" short:"V"`
 }
 
 type MailReplyCmd struct {
@@ -237,3 +270,26 @@ type MailboxDeleteCmd struct {
 
 // VersionCmd shows version information
 type VersionCmd struct{}
+
+// ContactsCmd handles address book management
+type ContactsCmd struct {
+	List   ContactsListCmd   `cmd:"" help:"List all contacts"`
+	Search ContactsSearchCmd `cmd:"" help:"Search contacts"`
+	Add    ContactsAddCmd    `cmd:"" help:"Add a contact"`
+	Remove ContactsRemoveCmd `cmd:"" help:"Remove a contact"`
+}
+
+type ContactsListCmd struct{}
+
+type ContactsSearchCmd struct {
+	Query string `arg:"" help:"Search query (matches name or email)"`
+}
+
+type ContactsAddCmd struct {
+	Email string `arg:"" help:"Contact email address"`
+	Name  string `help:"Contact display name" short:"n" name:"name"`
+}
+
+type ContactsRemoveCmd struct {
+	Email string `arg:"" help:"Contact email address to remove"`
+}

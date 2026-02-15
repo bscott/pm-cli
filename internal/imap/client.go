@@ -360,6 +360,34 @@ func (c *Client) MoveMessage(mailbox, id, destMailbox string) error {
 	return c.MoveMessages(mailbox, []string{id}, destMailbox)
 }
 
+// CopyMessages copies messages to a destination folder without removing from source.
+// This is used for adding labels in Proton Bridge, where copying to a Labels/X folder
+// adds that label while keeping the message in its original location.
+func (c *Client) CopyMessages(mailbox string, ids []string, destMailbox string) error {
+	_, err := c.SelectMailbox(mailbox)
+	if err != nil {
+		return err
+	}
+
+	// Build sequence set from all IDs
+	var seqSet imap.SeqSet
+	for _, id := range ids {
+		var seqNum uint32
+		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
+			return fmt.Errorf("invalid message ID: %s", id)
+		}
+		seqSet.AddNum(seqNum)
+	}
+
+	// Copy to destination (does not delete from source)
+	copyCmd := c.client.Copy(seqSet, destMailbox)
+	if _, err := copyCmd.Wait(); err != nil {
+		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
+	}
+
+	return nil
+}
+
 func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) error {
 	_, err := c.SelectMailbox(mailbox)
 	if err != nil {
@@ -1105,6 +1133,63 @@ func splitPartNum(s string) []int {
 		parts = append(parts, n)
 	}
 	return parts
+}
+
+// GetMessageLabels returns the labels applied to a message by searching label folders.
+// This searches all Labels/* folders for a message with the same Message-ID.
+func (c *Client) GetMessageLabels(messageID string) ([]string, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	if messageID == "" {
+		return nil, nil
+	}
+
+	// First, get all mailboxes to find label folders
+	mailboxes, err := c.ListMailboxes()
+	if err != nil {
+		return nil, err
+	}
+
+	var labels []string
+	const labelPrefix = "Labels/"
+
+	for _, mb := range mailboxes {
+		if !strings.HasPrefix(mb.Name, labelPrefix) {
+			continue
+		}
+
+		labelName := strings.TrimPrefix(mb.Name, labelPrefix)
+		if labelName == "" {
+			continue
+		}
+
+		// Search this label folder for the message ID
+		_, err := c.SelectMailbox(mb.Name)
+		if err != nil {
+			continue
+		}
+
+		// Search by Message-ID header
+		criteria := &imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{
+				{Key: "Message-ID", Value: messageID},
+			},
+		}
+
+		searchCmd := c.client.Search(criteria, nil)
+		searchData, err := searchCmd.Wait()
+		if err != nil {
+			continue
+		}
+
+		if len(searchData.AllSeqNums()) > 0 {
+			labels = append(labels, labelName)
+		}
+	}
+
+	return labels, nil
 }
 
 // Draft represents an email draft

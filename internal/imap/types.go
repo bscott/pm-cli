@@ -37,6 +37,7 @@ type Message struct {
 	Date       string   `json:"date"`
 	DateISO    string   `json:"date_iso,omitempty"`
 	Flags      []string `json:"flags"`
+	Labels     []string `json:"labels,omitempty"`
 	TextBody   string   `json:"text_body,omitempty"`
 	HTMLBody    string       `json:"html_body,omitempty"`
 	RawBody     []byte       `json:"-"`

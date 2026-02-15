@@ -67,6 +67,7 @@ func extractCommands(cli *CLI) []CommandSchema {
 		extractConfigCommands(),
 		extractMailCommands(),
 		extractMailboxCommands(),
+		extractLabelCommands(),
 		{
 			Name:        "version",
 			Description: "Show version information",
@@ -252,6 +253,50 @@ func extractMailboxCommands() CommandSchema {
 					{Name: "name", Type: "string", Required: true, Description: "Mailbox name to delete"},
 				},
 				Examples: []string{"pm-cli mailbox delete 'Old Folder'"},
+			},
+		},
+	}
+}
+
+func extractLabelCommands() CommandSchema {
+	return CommandSchema{
+		Name:        "mail label",
+		Description: "Manage message labels (Proton Mail labels via Bridge)",
+		Subcommands: []CommandSchema{
+			{
+				Name:        "mail label list",
+				Description: "List all available labels",
+				Examples:    []string{"pm-cli mail label list", "pm-cli mail label list --json"},
+			},
+			{
+				Name:        "mail label add",
+				Description: "Add a label to message(s)",
+				Args: []ArgSchema{
+					{Name: "ids", Type: "[]string", Required: true, Description: "Message ID(s) to label"},
+				},
+				Flags: []FlagSchema{
+					{Name: "--label", Short: "-l", Type: "string", Required: true, Description: "Label name to add"},
+					{Name: "--mailbox", Short: "-m", Type: "string", Default: "INBOX", Description: "Source mailbox"},
+				},
+				Examples: []string{
+					"pm-cli mail label add 123 -l Important",
+					"pm-cli mail label add 123 456 -l 'Work/Projects'",
+					"pm-cli mail label add 123 -l Todo -m Archive",
+				},
+			},
+			{
+				Name:        "mail label remove",
+				Description: "Remove a label from message(s)",
+				Args: []ArgSchema{
+					{Name: "ids", Type: "[]string", Required: true, Description: "Message ID(s) to unlabel"},
+				},
+				Flags: []FlagSchema{
+					{Name: "--label", Short: "-l", Type: "string", Required: true, Description: "Label name to remove"},
+				},
+				Examples: []string{
+					"pm-cli mail label remove 123 -l Important",
+					"pm-cli mail label remove 123 456 -l Todo",
+				},
 			},
 		},
 	}
