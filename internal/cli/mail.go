@@ -42,17 +42,29 @@ func (c *MailListCmd) Run(ctx *Context) error {
 
 	ctx.Formatter.Verbosef("Fetching messages from %s...", mailbox)
 
-	messages, err := client.ListMessages(mailbox, limit, c.Unread)
+	// Calculate offset from page if specified
+	offset := c.Offset
+	if c.Page > 0 {
+		offset = (c.Page - 1) * limit
+	}
+
+	messages, err := client.ListMessages(mailbox, limit, offset, c.Unread)
 	if err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
-		return ctx.Formatter.PrintJSON(map[string]interface{}{
+		result := map[string]interface{}{
 			"mailbox":  mailbox,
 			"count":    len(messages),
 			"messages": messages,
-		})
+			"offset":   offset,
+			"limit":    limit,
+		}
+		if c.Page > 0 {
+			result["page"] = c.Page
+		}
+		return ctx.Formatter.PrintJSON(result)
 	}
 
 	if len(messages) == 0 {

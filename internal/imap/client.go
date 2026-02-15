@@ -110,7 +110,7 @@ func (c *Client) SelectMailbox(name string) (*MailboxStatus, error) {
 	}, nil
 }
 
-func (c *Client) ListMessages(mailbox string, limit int, unreadOnly bool) ([]MessageSummary, error) {
+func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool) ([]MessageSummary, error) {
 	status, err := c.SelectMailbox(mailbox)
 	if err != nil {
 		return nil, err
@@ -120,15 +120,22 @@ func (c *Client) ListMessages(mailbox string, limit int, unreadOnly bool) ([]Mes
 		return []MessageSummary{}, nil
 	}
 
-	// Calculate the range of messages to fetch (most recent first)
-	start := uint32(1)
-	if status.Messages > uint32(limit) {
-		start = status.Messages - uint32(limit) + 1
+	// Calculate the range of messages to fetch (most recent first, with offset)
+	// offset=0: get the last `limit` messages
+	// offset=20: skip the 20 most recent, get the next `limit`
+	total := int(status.Messages)
+	end := total - offset
+	if end <= 0 {
+		return []MessageSummary{}, nil
+	}
+	start := end - limit + 1
+	if start < 1 {
+		start = 1
 	}
 
 	// Build sequence set for range
 	var seqSet imap.SeqSet
-	seqSet.AddRange(start, status.Messages)
+	seqSet.AddRange(uint32(start), uint32(end))
 
 	// Fetch options
 	fetchOptions := &imap.FetchOptions{
@@ -1145,7 +1152,7 @@ func (c *Client) UpdateDraft(id string, draft *Draft) (uint32, error) {
 
 // ListDrafts returns drafts from the Drafts folder
 func (c *Client) ListDrafts(limit int) ([]MessageSummary, error) {
-	return c.ListMessages("Drafts", limit, false)
+	return c.ListMessages("Drafts", limit, 0, false)
 }
 
 // GetDraft retrieves a specific draft

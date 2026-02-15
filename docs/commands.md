@@ -116,7 +116,14 @@ pm-cli mail list [flags]
 |------|-------------|---------|
 | `-m, --mailbox` | Mailbox name | INBOX |
 | `-n, --limit` | Number of messages | 20 |
+| `--offset` | Skip first N messages | 0 |
+| `-p, --page` | Page number (1-based) | 0 |
 | `--unread` | Only show unread messages | false |
+
+**Pagination:**
+- Use `--offset` to skip messages (e.g., `--offset 20` skips the 20 most recent)
+- Use `--page` for page-based navigation (e.g., `-p 2 -n 20` shows messages 21-40)
+- JSON output includes `offset`, `limit`, and `page` fields
 
 **Examples:**
 ```bash
@@ -125,6 +132,11 @@ pm-cli mail list -n 50
 pm-cli mail list -m Sent
 pm-cli mail list --unread
 pm-cli mail list --json
+
+# Pagination
+pm-cli mail list --offset 20           # Skip 20 most recent
+pm-cli mail list -p 2 -n 20            # Page 2 (messages 21-40)
+pm-cli mail list -p 3 -n 10 --json     # Page 3, 10 per page, JSON output
 ```
 
 ### mail read

@@ -126,6 +126,8 @@ type DraftDeleteCmd struct {
 type MailListCmd struct {
 	Mailbox string `help:"Mailbox name" short:"m" default:"INBOX"`
 	Limit   int    `help:"Number of messages" short:"n" default:"20"`
+	Offset  int    `help:"Skip first N messages" default:"0"`
+	Page    int    `help:"Page number (1-based, combines with limit)" short:"p" default:"0"`
 	Unread  bool   `help:"Only show unread messages"`
 }
 
