@@ -46,3 +46,19 @@ type Attachment struct {
 	Size        int64  `json:"size"`
 	Data        []byte `json:"-"`
 }
+
+// SearchOptions contains all search criteria for the Search method
+type SearchOptions struct {
+	Query          string // General query (searches body text)
+	From           string // Filter by sender
+	To             string // Filter by recipient
+	Subject        string // Filter by subject
+	Body           string // Search in message body
+	Since          string // Messages since date (YYYY-MM-DD)
+	Before         string // Messages before date (YYYY-MM-DD)
+	HasAttachments bool   // Only messages with attachments
+	LargerThan     int64  // Messages larger than this size in bytes
+	SmallerThan    int64  // Messages smaller than this size in bytes
+	UseOr          bool   // Combine filters with OR instead of AND
+	Negate         bool   // Negate the entire search
+}

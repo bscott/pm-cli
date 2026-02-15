@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/emersion/go-imap/v2"
@@ -342,22 +343,29 @@ func (c *Client) DeleteMessages(mailbox string, ids []string, permanent bool) er
 }
 
 func (c *Client) MoveMessage(mailbox, id, destMailbox string) error {
+	return c.MoveMessages(mailbox, []string{id}, destMailbox)
+}
+
+func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) error {
 	_, err := c.SelectMailbox(mailbox)
 	if err != nil {
 		return err
 	}
 
-	var seqNum uint32
-	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-		return fmt.Errorf("invalid message ID: %s", id)
+	// Build sequence set from all IDs
+	var seqSet imap.SeqSet
+	for _, id := range ids {
+		var seqNum uint32
+		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
+			return fmt.Errorf("invalid message ID: %s", id)
+		}
+		seqSet.AddNum(seqNum)
 	}
-
-	seqSet := imap.SeqSetNum(seqNum)
 
 	// Copy to destination
 	copyCmd := c.client.Copy(seqSet, destMailbox)
 	if _, err := copyCmd.Wait(); err != nil {
-		return fmt.Errorf("failed to copy message to %s: %w", destMailbox, err)
+		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
 
 	// Delete from source
@@ -377,17 +385,24 @@ func (c *Client) MoveMessage(mailbox, id, destMailbox string) error {
 }
 
 func (c *Client) SetFlags(mailbox, id string, read, unread, star, unstar bool) error {
+	return c.SetFlagsMultiple(mailbox, []string{id}, read, unread, star, unstar)
+}
+
+func (c *Client) SetFlagsMultiple(mailbox string, ids []string, read, unread, star, unstar bool) error {
 	_, err := c.SelectMailbox(mailbox)
 	if err != nil {
 		return err
 	}
 
-	var seqNum uint32
-	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-		return fmt.Errorf("invalid message ID: %s", id)
+	// Build sequence set from all IDs
+	var seqSet imap.SeqSet
+	for _, id := range ids {
+		var seqNum uint32
+		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
+			return fmt.Errorf("invalid message ID: %s", id)
+		}
+		seqSet.AddNum(seqNum)
 	}
-
-	seqSet := imap.SeqSetNum(seqNum)
 
 	if read {
 		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
@@ -432,35 +447,14 @@ func (c *Client) SetFlags(mailbox, id string, read, unread, star, unstar bool) e
 	return nil
 }
 
-func (c *Client) Search(mailbox, query, from, subject, since, before string) ([]MessageSummary, error) {
+func (c *Client) Search(mailbox string, opts SearchOptions) ([]MessageSummary, error) {
 	_, err := c.SelectMailbox(mailbox)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build search criteria
-	criteria := &imap.SearchCriteria{}
-
-	if query != "" {
-		criteria.Body = []string{query}
-	}
-
-	if from != "" {
-		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
-			Key:   "From",
-			Value: from,
-		})
-	}
-
-	if subject != "" {
-		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
-			Key:   "Subject",
-			Value: subject,
-		})
-	}
-
-	// Note: Date filtering would require parsing the since/before strings
-	// and setting criteria.Since / criteria.Before
+	// Build search criteria based on options
+	criteria := c.buildSearchCriteria(opts)
 
 	searchCmd := c.client.Search(criteria, nil)
 	searchData, err := searchCmd.Wait()
@@ -550,6 +544,208 @@ func (c *Client) Search(mailbox, query, from, subject, since, before string) ([]
 	}
 
 	return messages, fetchCmd.Close()
+}
+
+// SearchIDs returns sequence numbers of messages matching the search criteria.
+// This is used for batch operations based on queries.
+func (c *Client) SearchIDs(mailbox string, opts SearchOptions) ([]string, error) {
+	_, err := c.SelectMailbox(mailbox)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build search criteria
+	criteria := c.buildSearchCriteria(opts)
+
+	searchCmd := c.client.Search(criteria, nil)
+	searchData, err := searchCmd.Wait()
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+
+	seqNums := searchData.AllSeqNums()
+	ids := make([]string, len(seqNums))
+	for i, num := range seqNums {
+		ids[i] = fmt.Sprintf("%d", num)
+	}
+
+	return ids, nil
+}
+
+// buildSearchCriteria constructs IMAP search criteria from SearchOptions
+func (c *Client) buildSearchCriteria(opts SearchOptions) *imap.SearchCriteria {
+	// For OR logic, we need to build individual criteria and combine them
+	if opts.UseOr {
+		return c.buildOrSearchCriteria(opts)
+	}
+
+	// Default AND logic: all criteria go into a single SearchCriteria
+	criteria := &imap.SearchCriteria{}
+
+	// Body text search (general query or explicit body search)
+	if opts.Query != "" {
+		criteria.Body = append(criteria.Body, opts.Query)
+	}
+	if opts.Body != "" {
+		criteria.Body = append(criteria.Body, opts.Body)
+	}
+
+	// Header filters
+	if opts.From != "" {
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
+			Key:   "From",
+			Value: opts.From,
+		})
+	}
+
+	if opts.To != "" {
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
+			Key:   "To",
+			Value: opts.To,
+		})
+	}
+
+	if opts.Subject != "" {
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
+			Key:   "Subject",
+			Value: opts.Subject,
+		})
+	}
+
+	// Date filters
+	if opts.Since != "" {
+		if t, err := parseDate(opts.Since); err == nil {
+			criteria.Since = t
+		}
+	}
+
+	if opts.Before != "" {
+		if t, err := parseDate(opts.Before); err == nil {
+			criteria.Before = t
+		}
+	}
+
+	// Size filters
+	if opts.LargerThan > 0 {
+		criteria.Larger = opts.LargerThan
+	}
+
+	if opts.SmallerThan > 0 {
+		criteria.Smaller = opts.SmallerThan
+	}
+
+	// Attachment filter: IMAP doesn't have a direct "has attachment" search key,
+	// but multipart/mixed Content-Type typically indicates attachments
+	if opts.HasAttachments {
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{
+			Key:   "Content-Type",
+			Value: "multipart/mixed",
+		})
+	}
+
+	// Negation: wrap the entire criteria in a NOT
+	if opts.Negate {
+		return &imap.SearchCriteria{
+			Not: []imap.SearchCriteria{*criteria},
+		}
+	}
+
+	return criteria
+}
+
+// buildOrSearchCriteria constructs criteria with OR logic between filters
+func (c *Client) buildOrSearchCriteria(opts SearchOptions) *imap.SearchCriteria {
+	var orCriteria []imap.SearchCriteria
+
+	// Build individual criteria for each filter
+	if opts.Query != "" {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Body: []string{opts.Query},
+		})
+	}
+
+	if opts.Body != "" {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Body: []string{opts.Body},
+		})
+	}
+
+	if opts.From != "" {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{{Key: "From", Value: opts.From}},
+		})
+	}
+
+	if opts.To != "" {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{{Key: "To", Value: opts.To}},
+		})
+	}
+
+	if opts.Subject != "" {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{{Key: "Subject", Value: opts.Subject}},
+		})
+	}
+
+	if opts.Since != "" {
+		if t, err := parseDate(opts.Since); err == nil {
+			orCriteria = append(orCriteria, imap.SearchCriteria{Since: t})
+		}
+	}
+
+	if opts.Before != "" {
+		if t, err := parseDate(opts.Before); err == nil {
+			orCriteria = append(orCriteria, imap.SearchCriteria{Before: t})
+		}
+	}
+
+	if opts.LargerThan > 0 {
+		orCriteria = append(orCriteria, imap.SearchCriteria{Larger: opts.LargerThan})
+	}
+
+	if opts.SmallerThan > 0 {
+		orCriteria = append(orCriteria, imap.SearchCriteria{Smaller: opts.SmallerThan})
+	}
+
+	if opts.HasAttachments {
+		orCriteria = append(orCriteria, imap.SearchCriteria{
+			Header: []imap.SearchCriteriaHeaderField{{Key: "Content-Type", Value: "multipart/mixed"}},
+		})
+	}
+
+	// If no criteria, return empty criteria (matches all)
+	if len(orCriteria) == 0 {
+		return &imap.SearchCriteria{}
+	}
+
+	// If only one criterion, return it directly
+	if len(orCriteria) == 1 {
+		if opts.Negate {
+			return &imap.SearchCriteria{Not: orCriteria}
+		}
+		return &orCriteria[0]
+	}
+
+	// Combine with OR logic: IMAP OR takes two operands, so we chain them
+	// OR(a, OR(b, OR(c, d))) for multiple criteria
+	result := orCriteria[len(orCriteria)-1]
+	for i := len(orCriteria) - 2; i >= 0; i-- {
+		result = imap.SearchCriteria{
+			Or: [][2]imap.SearchCriteria{{orCriteria[i], result}},
+		}
+	}
+
+	if opts.Negate {
+		return &imap.SearchCriteria{Not: []imap.SearchCriteria{result}}
+	}
+
+	return &result
+}
+
+// parseDate parses a date string in YYYY-MM-DD format
+func parseDate(s string) (time.Time, error) {
+	return time.Parse("2006-01-02", s)
 }
 
 func (c *Client) CreateMailbox(name string) error {

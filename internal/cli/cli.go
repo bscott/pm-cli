@@ -126,7 +126,9 @@ type MailForwardCmd struct {
 }
 
 type MailDeleteCmd struct {
-	IDs       []string `arg:"" help:"Message ID(s) to delete"`
+	IDs       []string `arg:"" optional:"" help:"Message ID(s) to delete"`
+	Query     string   `help:"Delete messages matching search query (e.g., 'from:spam@example.com')"`
+	Mailbox   string   `help:"Mailbox to operate on" short:"m" default:"INBOX"`
 	Permanent bool     `help:"Skip trash, delete permanently"`
 }
 
@@ -137,25 +139,37 @@ type MailDownloadCmd struct {
 }
 
 type MailMoveCmd struct {
-	ID      string `arg:"" help:"Message ID to move"`
-	Mailbox string `arg:"" help:"Destination mailbox"`
+	IDs         []string `arg:"" optional:"" help:"Message ID(s) to move"`
+	Destination string   `help:"Destination mailbox" short:"d" required:""`
+	Query       string   `help:"Move messages matching search query (e.g., 'subject:newsletter')"`
+	Mailbox     string   `help:"Source mailbox" short:"m" default:"INBOX"`
 }
 
 type MailFlagCmd struct {
-	ID     string `arg:"" help:"Message ID"`
-	Read   bool   `help:"Mark as read" xor:"read"`
-	Unread bool   `help:"Mark as unread" xor:"read"`
-	Star   bool   `help:"Add star" xor:"star"`
-	Unstar bool   `help:"Remove star" xor:"star"`
+	IDs     []string `arg:"" optional:"" help:"Message ID(s)"`
+	Query   string   `help:"Flag messages matching search query (e.g., 'from:user@example.com')"`
+	Mailbox string   `help:"Mailbox to operate on" short:"m" default:"INBOX"`
+	Read    bool     `help:"Mark as read" xor:"read"`
+	Unread  bool     `help:"Mark as unread" xor:"read"`
+	Star    bool     `help:"Add star" xor:"star"`
+	Unstar  bool     `help:"Remove star" xor:"star"`
 }
 
 type MailSearchCmd struct {
-	Query   string `arg:"" help:"Search query"`
-	Mailbox string `help:"Mailbox to search" short:"m" default:"INBOX"`
-	From    string `help:"Filter by sender"`
-	Subject string `help:"Filter by subject"`
-	Since   string `help:"Messages since date (YYYY-MM-DD)"`
-	Before  string `help:"Messages before date (YYYY-MM-DD)"`
+	Query          string `arg:"" optional:"" help:"Search query (searches body text)"`
+	Mailbox        string `help:"Mailbox to search" short:"m" default:"INBOX"`
+	From           string `help:"Filter by sender"`
+	To             string `help:"Filter by recipient"`
+	Subject        string `help:"Filter by subject"`
+	Body           string `help:"Search in message body"`
+	Since          string `help:"Messages since date (YYYY-MM-DD)"`
+	Before         string `help:"Messages before date (YYYY-MM-DD)"`
+	HasAttachments bool   `help:"Only messages with attachments" name:"has-attachments"`
+	LargerThan     string `help:"Messages larger than size (e.g., 1M, 500K)" name:"larger-than"`
+	SmallerThan    string `help:"Messages smaller than size (e.g., 10M, 1K)" name:"smaller-than"`
+	And            bool   `help:"Combine filters with AND (default)" name:"and" xor:"logic" default:"true"`
+	Or             bool   `help:"Combine filters with OR" name:"or" xor:"logic"`
+	Not            bool   `help:"Negate the search query" name:"not"`
 }
 
 // MailboxCmd handles mailbox management

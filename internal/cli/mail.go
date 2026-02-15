@@ -297,6 +297,11 @@ func (c *MailDeleteCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
+	// Require either IDs or query
+	if len(c.IDs) == 0 && c.Query == "" {
+		return fmt.Errorf("provide message ID(s) or use --query to match messages")
+	}
+
 	client, err := imap.NewClient(ctx.Config)
 	if err != nil {
 		return err
@@ -307,14 +312,44 @@ func (c *MailDeleteCmd) Run(ctx *Context) error {
 	}
 	defer client.Close()
 
-	if err := client.DeleteMessages(ctx.Config.Defaults.Mailbox, c.IDs, c.Permanent); err != nil {
+	mailbox := c.Mailbox
+	if mailbox == "" {
+		mailbox = ctx.Config.Defaults.Mailbox
+	}
+
+	ids := c.IDs
+
+	// If query is provided, search for matching messages
+	if c.Query != "" {
+		opts := parseQueryToSearchOptions(c.Query)
+		searchIDs, err := client.SearchIDs(mailbox, opts)
+		if err != nil {
+			return fmt.Errorf("search failed: %w", err)
+		}
+		if len(searchIDs) == 0 {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success": true,
+					"deleted": []string{},
+					"message": "No messages matched the query",
+				})
+			}
+			fmt.Println("No messages matched the query.")
+			return nil
+		}
+		ids = searchIDs
+		ctx.Formatter.Verbosef("Query matched %d message(s)", len(ids))
+	}
+
+	if err := client.DeleteMessages(mailbox, ids, c.Permanent); err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
 		return ctx.Formatter.PrintJSON(map[string]interface{}{
 			"success":   true,
-			"deleted":   c.IDs,
+			"deleted":   ids,
+			"count":     len(ids),
 			"permanent": c.Permanent,
 		})
 	}
@@ -323,13 +358,18 @@ func (c *MailDeleteCmd) Run(ctx *Context) error {
 	if c.Permanent {
 		action = "permanently deleted"
 	}
-	fmt.Printf("Message(s) %s %s.\n", strings.Join(c.IDs, ", "), action)
+	fmt.Printf("%d message(s) %s.\n", len(ids), action)
 	return nil
 }
 
 func (c *MailMoveCmd) Run(ctx *Context) error {
 	if ctx.Config.Bridge.Email == "" {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	// Require either IDs or query
+	if len(c.IDs) == 0 && c.Query == "" {
+		return fmt.Errorf("provide message ID(s) or use --query to match messages")
 	}
 
 	client, err := imap.NewClient(ctx.Config)
@@ -342,19 +382,50 @@ func (c *MailMoveCmd) Run(ctx *Context) error {
 	}
 	defer client.Close()
 
-	if err := client.MoveMessage(ctx.Config.Defaults.Mailbox, c.ID, c.Mailbox); err != nil {
+	mailbox := c.Mailbox
+	if mailbox == "" {
+		mailbox = ctx.Config.Defaults.Mailbox
+	}
+
+	ids := c.IDs
+
+	// If query is provided, search for matching messages
+	if c.Query != "" {
+		opts := parseQueryToSearchOptions(c.Query)
+		searchIDs, err := client.SearchIDs(mailbox, opts)
+		if err != nil {
+			return fmt.Errorf("search failed: %w", err)
+		}
+		if len(searchIDs) == 0 {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success":     true,
+					"moved":       []string{},
+					"destination": c.Destination,
+					"message":     "No messages matched the query",
+				})
+			}
+			fmt.Println("No messages matched the query.")
+			return nil
+		}
+		ids = searchIDs
+		ctx.Formatter.Verbosef("Query matched %d message(s)", len(ids))
+	}
+
+	if err := client.MoveMessages(mailbox, ids, c.Destination); err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
 		return ctx.Formatter.PrintJSON(map[string]interface{}{
 			"success":     true,
-			"message_id":  c.ID,
-			"destination": c.Mailbox,
+			"moved":       ids,
+			"count":       len(ids),
+			"destination": c.Destination,
 		})
 	}
 
-	fmt.Printf("Message %s moved to %s.\n", c.ID, c.Mailbox)
+	fmt.Printf("%d message(s) moved to %s.\n", len(ids), c.Destination)
 	return nil
 }
 
@@ -367,6 +438,11 @@ func (c *MailFlagCmd) Run(ctx *Context) error {
 		return fmt.Errorf("no flags specified - use --read, --unread, --star, or --unstar")
 	}
 
+	// Require either IDs or query
+	if len(c.IDs) == 0 && c.Query == "" {
+		return fmt.Errorf("provide message ID(s) or use --query to match messages")
+	}
+
 	client, err := imap.NewClient(ctx.Config)
 	if err != nil {
 		return err
@@ -377,18 +453,48 @@ func (c *MailFlagCmd) Run(ctx *Context) error {
 	}
 	defer client.Close()
 
-	if err := client.SetFlags(ctx.Config.Defaults.Mailbox, c.ID, c.Read, c.Unread, c.Star, c.Unstar); err != nil {
+	mailbox := c.Mailbox
+	if mailbox == "" {
+		mailbox = ctx.Config.Defaults.Mailbox
+	}
+
+	ids := c.IDs
+
+	// If query is provided, search for matching messages
+	if c.Query != "" {
+		opts := parseQueryToSearchOptions(c.Query)
+		searchIDs, err := client.SearchIDs(mailbox, opts)
+		if err != nil {
+			return fmt.Errorf("search failed: %w", err)
+		}
+		if len(searchIDs) == 0 {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success": true,
+					"flagged": []string{},
+					"message": "No messages matched the query",
+				})
+			}
+			fmt.Println("No messages matched the query.")
+			return nil
+		}
+		ids = searchIDs
+		ctx.Formatter.Verbosef("Query matched %d message(s)", len(ids))
+	}
+
+	if err := client.SetFlagsMultiple(mailbox, ids, c.Read, c.Unread, c.Star, c.Unstar); err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
 		return ctx.Formatter.PrintJSON(map[string]interface{}{
-			"success":    true,
-			"message_id": c.ID,
-			"read":       c.Read,
-			"unread":     c.Unread,
-			"star":       c.Star,
-			"unstar":     c.Unstar,
+			"success": true,
+			"flagged": ids,
+			"count":   len(ids),
+			"read":    c.Read,
+			"unread":  c.Unread,
+			"star":    c.Star,
+			"unstar":  c.Unstar,
 		})
 	}
 
@@ -406,7 +512,7 @@ func (c *MailFlagCmd) Run(ctx *Context) error {
 		changes = append(changes, "unstarred")
 	}
 
-	fmt.Printf("Message %s %s.\n", c.ID, strings.Join(changes, ", "))
+	fmt.Printf("%d message(s) %s.\n", len(ids), strings.Join(changes, ", "))
 	return nil
 }
 
@@ -425,7 +531,23 @@ func (c *MailSearchCmd) Run(ctx *Context) error {
 	}
 	defer client.Close()
 
-	messages, err := client.Search(c.Mailbox, c.Query, c.From, c.Subject, c.Since, c.Before)
+	// Build search options from command flags
+	opts := imap.SearchOptions{
+		Query:          c.Query,
+		From:           c.From,
+		To:             c.To,
+		Subject:        c.Subject,
+		Body:           c.Body,
+		Since:          c.Since,
+		Before:         c.Before,
+		HasAttachments: c.HasAttachments,
+		LargerThan:     parseSize(c.LargerThan),
+		SmallerThan:    parseSize(c.SmallerThan),
+		UseOr:          c.Or,
+		Negate:         c.Not,
+	}
+
+	messages, err := client.Search(c.Mailbox, opts)
 	if err != nil {
 		return err
 	}
@@ -802,6 +924,74 @@ func parseMessageBody(rawBody []byte) (textBody, htmlBody string) {
 	return textBody, htmlBody
 }
 
+// parseQueryString parses a query string like "from:user@example.com subject:test"
+// into from, subject, and body components.
+// Supports from:, subject:, and body: prefixes. Unprefixed terms search the body.
+func parseQueryString(query string) (from, subject, body string) {
+	// Simple parser for key:value pairs
+	var bodyParts []string
+
+	// Handle quoted strings and key:value pairs
+	parts := splitQueryParts(query)
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		if strings.HasPrefix(strings.ToLower(part), "from:") {
+			from = strings.TrimPrefix(part, "from:")
+			from = strings.TrimPrefix(from, "FROM:")
+			from = strings.Trim(from, "\"")
+		} else if strings.HasPrefix(strings.ToLower(part), "subject:") {
+			subject = strings.TrimPrefix(part, "subject:")
+			subject = strings.TrimPrefix(subject, "SUBJECT:")
+			subject = strings.Trim(subject, "\"")
+		} else if strings.HasPrefix(strings.ToLower(part), "body:") {
+			bodyTerm := strings.TrimPrefix(part, "body:")
+			bodyTerm = strings.TrimPrefix(bodyTerm, "BODY:")
+			bodyTerm = strings.Trim(bodyTerm, "\"")
+			bodyParts = append(bodyParts, bodyTerm)
+		} else {
+			// Unprefixed terms are body searches
+			bodyParts = append(bodyParts, strings.Trim(part, "\""))
+		}
+	}
+
+	body = strings.Join(bodyParts, " ")
+	return from, subject, body
+}
+
+// splitQueryParts splits a query string respecting quoted strings.
+// "hello world" from:user becomes ["hello world", "from:user"]
+func splitQueryParts(query string) []string {
+	var parts []string
+	var current strings.Builder
+	inQuotes := false
+
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		if c == '"' {
+			inQuotes = !inQuotes
+			current.WriteByte(c)
+		} else if c == ' ' && !inQuotes {
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		} else {
+			current.WriteByte(c)
+		}
+	}
+
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+
+	return parts
+}
+
 // htmlToText converts HTML to plain text by stripping tags and decoding entities
 func htmlToText(htmlContent string) string {
 	// Remove style and script blocks
@@ -949,4 +1139,65 @@ func parseAttachments(rawBody []byte) []imap.Attachment {
 	}
 
 	return attachments
+}
+
+// parseSize parses size strings like "1M", "500K", "1G" into bytes
+func parseSize(s string) int64 {
+	if s == "" {
+		return 0
+	}
+
+	s = strings.TrimSpace(strings.ToUpper(s))
+	if len(s) == 0 {
+		return 0
+	}
+
+	multiplier := int64(1)
+	suffix := s[len(s)-1]
+
+	switch suffix {
+	case 'K':
+		multiplier = 1024
+		s = s[:len(s)-1]
+	case 'M':
+		multiplier = 1024 * 1024
+		s = s[:len(s)-1]
+	case 'G':
+		multiplier = 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	case 'B':
+		// Handle "KB", "MB", "GB" suffixes
+		if len(s) >= 2 {
+			prefix := s[len(s)-2]
+			switch prefix {
+			case 'K':
+				multiplier = 1024
+				s = s[:len(s)-2]
+			case 'M':
+				multiplier = 1024 * 1024
+				s = s[:len(s)-2]
+			case 'G':
+				multiplier = 1024 * 1024 * 1024
+				s = s[:len(s)-2]
+			default:
+				s = s[:len(s)-1]
+			}
+		} else {
+			s = s[:len(s)-1]
+		}
+	}
+
+	var value int64
+	fmt.Sscanf(s, "%d", &value)
+	return value * multiplier
+}
+
+// parseQueryToSearchOptions converts a query string to SearchOptions
+func parseQueryToSearchOptions(query string) imap.SearchOptions {
+	from, subject, body := parseQueryString(query)
+	return imap.SearchOptions{
+		Query:   body,
+		From:    from,
+		Subject: subject,
+	}
 }
