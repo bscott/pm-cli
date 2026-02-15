@@ -153,12 +153,14 @@ pm-cli mail read <id> [flags]
 | `--raw` | Show raw MIME source |
 | `--headers` | Include all headers |
 | `--attachments` | List attachments only |
+| `--html` | Output HTML body instead of plain text |
 
 **Examples:**
 ```bash
 pm-cli mail read 123
 pm-cli mail read 123 --headers
 pm-cli mail read 123 --raw
+pm-cli mail read 123 --html            # View HTML content
 pm-cli mail read 123 --attachments
 pm-cli mail read 123 --json
 ```

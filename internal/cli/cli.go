@@ -136,6 +136,7 @@ type MailReadCmd struct {
 	Raw         bool   `help:"Show raw message"`
 	Headers     bool   `help:"Include all headers"`
 	Attachments bool   `help:"List attachments"`
+	HTML        bool   `help:"Output HTML body instead of plain text"`
 }
 
 type MailSendCmd struct {

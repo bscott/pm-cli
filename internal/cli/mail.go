@@ -227,18 +227,32 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 	// Parse and display body
 	if len(msg.RawBody) > 0 {
 		textBody, htmlBody := parseMessageBody(msg.RawBody)
-		if textBody != "" {
-			fmt.Println(textBody)
-		} else if htmlBody != "" {
-			// Convert HTML to plain text
-			text := htmlToText(htmlBody)
-			if text != "" {
-				fmt.Println(text)
+
+		if c.HTML {
+			// Output HTML body directly
+			if htmlBody != "" {
+				fmt.Println(htmlBody)
+			} else if textBody != "" {
+				// No HTML, output text
+				fmt.Println(textBody)
 			} else {
-				fmt.Println("[HTML content - use --raw to view]")
+				fmt.Println("[No body content]")
 			}
 		} else {
-			fmt.Println("[No body content]")
+			// Default: output plain text
+			if textBody != "" {
+				fmt.Println(textBody)
+			} else if htmlBody != "" {
+				// Convert HTML to plain text
+				text := htmlToText(htmlBody)
+				if text != "" {
+					fmt.Println(text)
+				} else {
+					fmt.Println("[HTML content - use --html to view]")
+				}
+			} else {
+				fmt.Println("[No body content]")
+			}
 		}
 	}
 
