@@ -1896,3 +1896,241 @@ func (c *MailThreadCmd) Run(ctx *Context) error {
 	fmt.Println(strings.Repeat("=", 60))
 	return nil
 }
+
+func (c *MailSummarizeCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	msg, err := client.GetMessage(c.Mailbox, c.ID)
+	if err != nil {
+		return err
+	}
+
+	// Parse body
+	textBody, htmlBody := parseMessageBody(msg.RawBody)
+	body := textBody
+	if body == "" && htmlBody != "" {
+		body = htmlToText(htmlBody)
+	}
+
+	// Build structured summary
+	summary := map[string]interface{}{
+		"id":         msg.SeqNum,
+		"uid":        msg.UID,
+		"message_id": msg.MessageID,
+		"from":       msg.From,
+		"to":         msg.To,
+		"cc":         msg.CC,
+		"subject":    msg.Subject,
+		"date":       msg.Date,
+		"date_iso":   msg.DateISO,
+		"flags":      msg.Flags,
+		"read":       containsString(msg.Flags, "\\Seen"),
+		"flagged":    containsString(msg.Flags, "\\Flagged"),
+		"body_preview": truncateBody(body, 500),
+		"body_length":  len(body),
+		"has_attachments": len(msg.Attachments) > 0,
+		"attachment_count": len(msg.Attachments),
+	}
+
+	if len(msg.Attachments) > 0 {
+		var attachmentSummaries []map[string]interface{}
+		for _, att := range msg.Attachments {
+			attachmentSummaries = append(attachmentSummaries, map[string]interface{}{
+				"filename":     att.Filename,
+				"content_type": att.ContentType,
+				"size":         att.Size,
+			})
+		}
+		summary["attachments"] = attachmentSummaries
+	}
+
+	// Always output as JSON for AI consumption
+	return ctx.Formatter.PrintJSON(summary)
+}
+
+func (c *MailExtractCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	msg, err := client.GetMessage(c.Mailbox, c.ID)
+	if err != nil {
+		return err
+	}
+
+	// Parse body
+	textBody, htmlBody := parseMessageBody(msg.RawBody)
+	body := textBody
+	if body == "" && htmlBody != "" {
+		body = htmlToText(htmlBody)
+	}
+
+	// Extract structured data
+	extracted := map[string]interface{}{
+		"id":       msg.SeqNum,
+		"subject":  msg.Subject,
+		"from":     msg.From,
+		"date":     msg.Date,
+		"date_iso": msg.DateISO,
+	}
+
+	// Extract email addresses mentioned in body
+	emails := extractEmails(body)
+	if len(emails) > 0 {
+		extracted["mentioned_emails"] = emails
+	}
+
+	// Extract URLs
+	urls := extractURLs(body)
+	if len(urls) > 0 {
+		extracted["urls"] = urls
+	}
+
+	// Extract dates mentioned in text
+	dates := extractDates(body)
+	if len(dates) > 0 {
+		extracted["mentioned_dates"] = dates
+	}
+
+	// Extract phone numbers
+	phones := extractPhones(body)
+	if len(phones) > 0 {
+		extracted["phone_numbers"] = phones
+	}
+
+	// Extract potential action items (lines starting with - or * or numbered)
+	actionItems := extractActionItems(body)
+	if len(actionItems) > 0 {
+		extracted["action_items"] = actionItems
+	}
+
+	// Include attachments info
+	if len(msg.Attachments) > 0 {
+		var attachments []map[string]interface{}
+		for _, att := range msg.Attachments {
+			attachments = append(attachments, map[string]interface{}{
+				"filename":     att.Filename,
+				"content_type": att.ContentType,
+				"size":         att.Size,
+			})
+		}
+		extracted["attachments"] = attachments
+	}
+
+	// Always output as JSON for AI consumption
+	return ctx.Formatter.PrintJSON(extracted)
+}
+
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if strings.EqualFold(item, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateBody(body string, maxLen int) string {
+	if len(body) <= maxLen {
+		return strings.TrimSpace(body)
+	}
+	return strings.TrimSpace(body[:maxLen]) + "..."
+}
+
+func extractEmails(text string) []string {
+	emailRegex := regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+	matches := emailRegex.FindAllString(text, -1)
+	return uniqueStrings(matches)
+}
+
+func extractURLs(text string) []string {
+	urlRegex := regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
+	matches := urlRegex.FindAllString(text, -1)
+	// Clean trailing punctuation
+	var cleaned []string
+	for _, u := range matches {
+		u = strings.TrimRight(u, ".,;:!?)")
+		cleaned = append(cleaned, u)
+	}
+	return uniqueStrings(cleaned)
+}
+
+func extractDates(text string) []string {
+	// Match common date formats
+	patterns := []string{
+		`\d{4}-\d{2}-\d{2}`,                           // 2024-01-15
+		`\d{1,2}/\d{1,2}/\d{2,4}`,                     // 1/15/24 or 01/15/2024
+		`(?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}`, // January 15, 2024
+		`\d{1,2} (?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4}`,   // 15 January 2024
+	}
+	
+	var dates []string
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindAllString(text, -1)
+		dates = append(dates, matches...)
+	}
+	return uniqueStrings(dates)
+}
+
+func extractPhones(text string) []string {
+	// Match common phone formats
+	phoneRegex := regexp.MustCompile(`(?:\+?1[-.]?)?\(?[0-9]{3}\)?[-. ]?[0-9]{3}[-. ]?[0-9]{4}`)
+	matches := phoneRegex.FindAllString(text, -1)
+	return uniqueStrings(matches)
+}
+
+func extractActionItems(text string) []string {
+	var items []string
+	lines := strings.Split(text, "\n")
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Lines starting with -, *, •, or numbered (1., 2., etc.)
+		if strings.HasPrefix(line, "- ") ||
+			strings.HasPrefix(line, "* ") ||
+			strings.HasPrefix(line, "• ") ||
+			regexp.MustCompile(`^\d+\.\s`).MatchString(line) {
+			// Clean up the prefix
+			item := regexp.MustCompile(`^[-*•]\s+|\d+\.\s+`).ReplaceAllString(line, "")
+			if len(item) > 0 && len(item) < 200 {
+				items = append(items, item)
+			}
+		}
+	}
+	return items
+}
+
+func uniqueStrings(slice []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range slice {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
+}

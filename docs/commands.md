@@ -625,6 +625,71 @@ pm-cli mail label remove 123 456 -l Todo
 - Labels must be created in the Proton Mail web/mobile interface (IMAP folder creation under Labels/ is not supported by Bridge)
 - IMAP keywords (X-Keywords header) are not synchronized by Bridge - only folder-based labels work
 
+### mail summarize
+
+Summarize a message in structured JSON format for AI processing.
+
+```bash
+pm-cli mail summarize <id> [flags]
+```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --mailbox` | Mailbox name | INBOX |
+
+**Output includes:**
+- Message metadata (from, to, cc, subject, date)
+- Read/flagged status
+- Body preview (first 500 chars)
+- Attachment count and details
+
+**Examples:**
+```bash
+pm-cli mail summarize 123
+pm-cli mail summarize 123 -m Sent
+```
+
+### mail extract
+
+Extract structured data from a message for AI processing.
+
+```bash
+pm-cli mail extract <id> [flags]
+```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --mailbox` | Mailbox name | INBOX |
+
+**Extracts:**
+- Email addresses mentioned in body
+- URLs/links
+- Dates mentioned in text
+- Phone numbers
+- Action items (bulleted/numbered lists)
+- Attachment info
+
+**Examples:**
+```bash
+pm-cli mail extract 123
+pm-cli mail extract 123 -m Archive
+```
+
+**Example output:**
+```json
+{
+  "id": 123,
+  "subject": "Meeting Follow-up",
+  "from": "sender@example.com",
+  "mentioned_emails": ["john@example.com", "jane@example.com"],
+  "urls": ["https://meet.google.com/abc-defg-hij"],
+  "mentioned_dates": ["January 15, 2024", "2024-01-20"],
+  "action_items": ["Review the proposal", "Send feedback by Friday"]
+}
+```
+
 ---
 
 ## mailbox

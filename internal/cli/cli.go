@@ -92,6 +92,18 @@ type MailCmd struct {
 	Thread   MailThreadCmd   `cmd:"" help:"Show conversation thread"`
 	Watch    MailWatchCmd    `cmd:"" help:"Watch for new messages"`
 	Label    LabelCmd        `cmd:"" help:"Manage message labels"`
+	Summarize MailSummarizeCmd `cmd:"" help:"Summarize message for AI processing"`
+	Extract   MailExtractCmd   `cmd:"" help:"Extract structured data from message"`
+}
+
+type MailSummarizeCmd struct {
+	ID      string `arg:"" help:"Message ID to summarize"`
+	Mailbox string `help:"Mailbox name" short:"m" default:"INBOX"`
+}
+
+type MailExtractCmd struct {
+	ID      string `arg:"" help:"Message ID to extract data from"`
+	Mailbox string `help:"Mailbox name" short:"m" default:"INBOX"`
 }
 
 // LabelCmd handles label management
