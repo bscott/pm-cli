@@ -19,6 +19,7 @@ type MessageSummary struct {
 	From    string `json:"from"`
 	Subject string `json:"subject"`
 	Date    string `json:"date"`
+	DateISO string `json:"date_iso,omitempty"`
 	Seen    bool   `json:"seen"`
 	Flagged bool   `json:"flagged"`
 }
@@ -32,6 +33,7 @@ type Message struct {
 	CC        []string `json:"cc,omitempty"`
 	Subject   string   `json:"subject"`
 	Date      string   `json:"date"`
+	DateISO   string   `json:"date_iso,omitempty"`
 	Flags     []string `json:"flags"`
 	TextBody  string   `json:"text_body,omitempty"`
 	HTMLBody    string       `json:"html_body,omitempty"`

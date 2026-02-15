@@ -160,6 +160,7 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 		var flags []imap.Flag
 		var uid imap.UID
 		var date string
+		var dateISO string
 
 		for {
 			item := msg.Next()
@@ -176,6 +177,7 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 				envelope = data.Envelope
 			case imapclient.FetchItemDataInternalDate:
 				date = data.Time.Format("2006-01-02 15:04")
+				dateISO = data.Time.Format(time.RFC3339)
 			}
 		}
 
@@ -215,6 +217,7 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 			From:    from,
 			Subject: envelope.Subject,
 			Date:    date,
+			DateISO: dateISO,
 			Seen:    seen,
 			Flagged: flagged,
 		}
@@ -289,6 +292,7 @@ func (c *Client) GetMessage(mailbox string, id string) (*Message, error) {
 		case imapclient.FetchItemDataEnvelope:
 			result.Subject = data.Envelope.Subject
 			result.Date = data.Envelope.Date.Format("2006-01-02 15:04:05")
+			result.DateISO = data.Envelope.Date.Format(time.RFC3339)
 			if len(data.Envelope.From) > 0 {
 				addr := data.Envelope.From[0]
 				result.From = formatAddress(addr)
@@ -543,6 +547,7 @@ func (c *Client) Search(mailbox string, opts SearchOptions) ([]MessageSummary, e
 			From:    fromStr,
 			Subject: envelope.Subject,
 			Date:    envelope.Date.Format("2006-01-02 15:04"),
+			DateISO: envelope.Date.Format(time.RFC3339),
 			Seen:    seen,
 			Flagged: flagged,
 		}

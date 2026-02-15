@@ -36,6 +36,8 @@ Output:
 {
   "mailbox": "INBOX",
   "count": 3,
+  "offset": 0,
+  "limit": 20,
   "messages": [
     {
       "uid": 97,
@@ -43,12 +45,15 @@ Output:
       "from": "sender@example.com",
       "subject": "Meeting tomorrow",
       "date": "2024-01-15 10:30",
+      "date_iso": "2024-01-15T10:30:00Z",
       "seen": false,
       "flagged": true
     }
   ]
 }
 ```
+
+**Note:** The `date_iso` field provides RFC3339 timestamps for easier parsing by AI agents and automation tools.
 
 ### Read Message with Attachments
 
