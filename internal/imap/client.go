@@ -304,6 +304,9 @@ func (c *Client) GetMessage(mailbox string, id string) (*Message, error) {
 				result.CC = append(result.CC, formatAddress(addr))
 			}
 			result.MessageID = data.Envelope.MessageID
+			if len(data.Envelope.InReplyTo) > 0 {
+				result.InReplyTo = data.Envelope.InReplyTo[0]
+			}
 		case imapclient.FetchItemDataBodySection:
 			body, err := readAll(data.Literal)
 			if err == nil {
@@ -1198,4 +1201,134 @@ func buildDraftMessage(draft *Draft, from string) string {
 	sb.WriteString(draft.Body)
 
 	return sb.String()
+}
+
+// ThreadMessage is a message with body text for thread display
+type ThreadMessage struct {
+	UID       uint32 `json:"uid"`
+	SeqNum    uint32 `json:"seq_num"`
+	MessageID string `json:"message_id,omitempty"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Subject   string `json:"subject"`
+	Date      string `json:"date"`
+	DateISO   string `json:"date_iso,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Seen      bool   `json:"seen"`
+}
+
+// GetThread retrieves all messages in a conversation thread
+func (c *Client) GetThread(mailbox, id string) ([]ThreadMessage, error) {
+	// First get the target message
+	msg, err := c.GetMessage(mailbox, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build subject pattern for thread matching (strip Re:/Fwd: prefixes)
+	baseSubject := stripSubjectPrefixes(msg.Subject)
+
+	// Search by subject (IMAP's primary threading mechanism)
+	results, err := c.Search(mailbox, SearchOptions{
+		Subject: baseSubject,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter and build thread messages
+	var thread []ThreadMessage
+	seenUIDs := make(map[uint32]bool)
+
+	for _, summary := range results {
+		if seenUIDs[summary.UID] {
+			continue
+		}
+		seenUIDs[summary.UID] = true
+
+		// Get full message for body
+		fullMsg, err := c.GetMessage(mailbox, fmt.Sprintf("%d", summary.SeqNum))
+		if err != nil {
+			continue
+		}
+
+		// Verify subject matches (strip prefixes for comparison)
+		if stripSubjectPrefixes(fullMsg.Subject) != baseSubject {
+			continue
+		}
+
+		// Extract body text
+		bodyText := fullMsg.TextBody
+		if bodyText == "" && len(fullMsg.RawBody) > 0 {
+			// Try to extract from raw body
+			bodyText = extractBodyText(fullMsg.RawBody)
+		}
+
+		thread = append(thread, ThreadMessage{
+			UID:       fullMsg.UID,
+			SeqNum:    fullMsg.SeqNum,
+			MessageID: fullMsg.MessageID,
+			From:      fullMsg.From,
+			To:        strings.Join(fullMsg.To, ", "),
+			Subject:   fullMsg.Subject,
+			Date:      fullMsg.Date,
+			DateISO:   fullMsg.DateISO,
+			Body:      bodyText,
+			Seen:      containsFlag(fullMsg.Flags, "\\Seen"),
+		})
+	}
+
+	// Sort by date (oldest first for conversation flow)
+	sortThreadByDate(thread)
+
+	return thread, nil
+}
+
+func stripSubjectPrefixes(subject string) string {
+	s := strings.TrimSpace(subject)
+	for {
+		lower := strings.ToLower(s)
+		if strings.HasPrefix(lower, "re:") {
+			s = strings.TrimSpace(s[3:])
+		} else if strings.HasPrefix(lower, "fwd:") {
+			s = strings.TrimSpace(s[4:])
+		} else if strings.HasPrefix(lower, "fw:") {
+			s = strings.TrimSpace(s[3:])
+		} else {
+			break
+		}
+	}
+	return s
+}
+
+func containsFlag(flags []string, flag string) bool {
+	for _, f := range flags {
+		if strings.EqualFold(f, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortThreadByDate(thread []ThreadMessage) {
+	// Simple bubble sort for thread (usually small)
+	for i := 0; i < len(thread)-1; i++ {
+		for j := 0; j < len(thread)-i-1; j++ {
+			if thread[j].DateISO > thread[j+1].DateISO {
+				thread[j], thread[j+1] = thread[j+1], thread[j]
+			}
+		}
+	}
+}
+
+func extractBodyText(raw []byte) string {
+	// Simple extraction - look for blank line separating headers from body
+	idx := strings.Index(string(raw), "\r\n\r\n")
+	if idx == -1 {
+		idx = strings.Index(string(raw), "\n\n")
+	}
+	if idx != -1 {
+		return strings.TrimSpace(string(raw[idx:]))
+	}
+	return ""
 }

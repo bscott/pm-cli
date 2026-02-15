@@ -88,6 +88,12 @@ type MailCmd struct {
 	Search   MailSearchCmd   `cmd:"" help:"Search messages"`
 	Download MailDownloadCmd `cmd:"" help:"Download attachment"`
 	Draft    DraftCmd        `cmd:"" help:"Manage drafts"`
+	Thread   MailThreadCmd   `cmd:"" help:"Show conversation thread"`
+}
+
+type MailThreadCmd struct {
+	ID      string `arg:"" help:"Message ID to show thread for"`
+	Mailbox string `help:"Mailbox to search" short:"m" default:"INBOX"`
 }
 
 // DraftCmd handles draft management

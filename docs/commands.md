@@ -443,6 +443,32 @@ pm-cli mail draft delete 42
 pm-cli mail draft delete 42 43 44
 ```
 
+### mail thread
+
+Show conversation thread for a message.
+
+```bash
+pm-cli mail thread <id> [flags]
+```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --mailbox` | Mailbox to search | INBOX |
+
+**Examples:**
+```bash
+pm-cli mail thread 123
+pm-cli mail thread 123 -m Sent
+pm-cli mail thread 123 --json
+```
+
+The thread command:
+- Finds all messages in the same conversation
+- Matches by subject (with Re:/Fwd: prefixes stripped)
+- Displays messages in chronological order
+- Shows body text (truncated) for each message
+
 ---
 
 ## mailbox

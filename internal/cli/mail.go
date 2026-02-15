@@ -1540,3 +1540,78 @@ func truncate(s string, max int) string {
 	}
 	return s[:max-3] + "..."
 }
+
+func (c *MailThreadCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	ctx.Formatter.Verbosef("Fetching conversation thread...")
+
+	thread, err := client.GetThread(c.Mailbox, c.ID)
+	if err != nil {
+		return err
+	}
+
+	if len(thread) == 0 {
+		if ctx.Formatter.JSON {
+			return ctx.Formatter.PrintJSON(map[string]interface{}{
+				"thread":  []interface{}{},
+				"count":   0,
+				"message": "No messages found in thread",
+			})
+		}
+		fmt.Println("No messages found in thread.")
+		return nil
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"thread":  thread,
+			"count":   len(thread),
+			"mailbox": c.Mailbox,
+		})
+	}
+
+	// Text output: show conversation flow
+	fmt.Printf("Conversation thread (%d messages):\n", len(thread))
+	fmt.Println(strings.Repeat("=", 60))
+
+	for i, msg := range thread {
+		if i > 0 {
+			fmt.Println(strings.Repeat("-", 60))
+		}
+		fmt.Printf("\nFrom:    %s\n", msg.From)
+		fmt.Printf("To:      %s\n", msg.To)
+		fmt.Printf("Date:    %s\n", msg.Date)
+		fmt.Printf("Subject: %s\n", msg.Subject)
+		if !msg.Seen {
+			fmt.Print("[UNREAD] ")
+		}
+		fmt.Printf("(ID: %d)\n", msg.SeqNum)
+		fmt.Println()
+
+		// Show body (truncated for readability)
+		body := msg.Body
+		if len(body) > 500 {
+			body = body[:500] + "\n[... truncated ...]"
+		}
+		if body != "" {
+			fmt.Println(body)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println(strings.Repeat("=", 60))
+	return nil
+}
