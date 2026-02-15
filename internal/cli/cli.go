@@ -87,6 +87,40 @@ type MailCmd struct {
 	Flag     MailFlagCmd     `cmd:"" help:"Manage message flags"`
 	Search   MailSearchCmd   `cmd:"" help:"Search messages"`
 	Download MailDownloadCmd `cmd:"" help:"Download attachment"`
+	Draft    DraftCmd        `cmd:"" help:"Manage drafts"`
+}
+
+// DraftCmd handles draft management
+type DraftCmd struct {
+	List   DraftListCmd   `cmd:"" help:"List all drafts"`
+	Create DraftCreateCmd `cmd:"" help:"Create a new draft"`
+	Edit   DraftEditCmd   `cmd:"" help:"Edit an existing draft"`
+	Delete DraftDeleteCmd `cmd:"" help:"Delete a draft"`
+}
+
+type DraftListCmd struct {
+	Limit int `help:"Number of drafts" short:"n" default:"20"`
+}
+
+type DraftCreateCmd struct {
+	To      []string `help:"Recipient(s)" short:"t"`
+	CC      []string `help:"CC recipients"`
+	Subject string   `help:"Subject line" short:"s"`
+	Body    string   `help:"Body text" short:"b"`
+	Attach  []string `help:"Attachments" short:"a" type:"existingfile"`
+}
+
+type DraftEditCmd struct {
+	ID      string   `arg:"" help:"Draft ID to edit"`
+	To      []string `help:"Recipient(s)" short:"t"`
+	CC      []string `help:"CC recipients"`
+	Subject string   `help:"Subject line" short:"s"`
+	Body    string   `help:"Body text" short:"b"`
+	Attach  []string `help:"Attachments" short:"a" type:"existingfile"`
+}
+
+type DraftDeleteCmd struct {
+	IDs []string `arg:"" help:"Draft ID(s) to delete"`
 }
 
 type MailListCmd struct {

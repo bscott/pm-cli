@@ -1091,3 +1091,99 @@ func splitPartNum(s string) []int {
 	}
 	return parts
 }
+
+// Draft represents an email draft
+type Draft struct {
+	To      []string
+	CC      []string
+	Subject string
+	Body    string
+}
+
+// CreateDraft creates a new draft in the Drafts folder
+func (c *Client) CreateDraft(draft *Draft) (uint32, error) {
+	if c.client == nil {
+		return 0, fmt.Errorf("not connected")
+	}
+
+	// Build the RFC822 message
+	message := buildDraftMessage(draft, c.config.Bridge.Email)
+
+	// Append to Drafts folder with \Draft flag
+	flags := []imap.Flag{imap.FlagDraft, imap.FlagSeen}
+	appendCmd := c.client.Append("Drafts", int64(len(message)), &imap.AppendOptions{
+		Flags: flags,
+	})
+
+	if _, err := appendCmd.Write([]byte(message)); err != nil {
+		return 0, fmt.Errorf("failed to write draft: %w", err)
+	}
+
+	data, err := appendCmd.Wait()
+	if err != nil {
+		return 0, fmt.Errorf("failed to create draft: %w", err)
+	}
+
+	// Return the UID of the created message
+	if data.UID > 0 {
+		return uint32(data.UID), nil
+	}
+
+	return 0, nil
+}
+
+// UpdateDraft updates an existing draft (deletes old, creates new)
+func (c *Client) UpdateDraft(id string, draft *Draft) (uint32, error) {
+	// Delete the old draft
+	if err := c.DeleteMessages("Drafts", []string{id}, true); err != nil {
+		return 0, fmt.Errorf("failed to delete old draft: %w", err)
+	}
+
+	// Create the new draft
+	return c.CreateDraft(draft)
+}
+
+// ListDrafts returns drafts from the Drafts folder
+func (c *Client) ListDrafts(limit int) ([]MessageSummary, error) {
+	return c.ListMessages("Drafts", limit, false)
+}
+
+// GetDraft retrieves a specific draft
+func (c *Client) GetDraft(id string) (*Message, error) {
+	return c.GetMessage("Drafts", id)
+}
+
+// DeleteDraft deletes a draft (permanently)
+func (c *Client) DeleteDraft(ids []string) error {
+	return c.DeleteMessages("Drafts", ids, true)
+}
+
+// buildDraftMessage creates an RFC822 message from a Draft
+func buildDraftMessage(draft *Draft, from string) string {
+	var sb strings.Builder
+
+	// Headers
+	sb.WriteString(fmt.Sprintf("From: %s\r\n", from))
+
+	if len(draft.To) > 0 {
+		sb.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(draft.To, ", ")))
+	}
+
+	if len(draft.CC) > 0 {
+		sb.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(draft.CC, ", ")))
+	}
+
+	if draft.Subject != "" {
+		sb.WriteString(fmt.Sprintf("Subject: %s\r\n", draft.Subject))
+	}
+
+	sb.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
+	sb.WriteString("MIME-Version: 1.0\r\n")
+	sb.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	sb.WriteString("\r\n")
+
+	// Body
+	sb.WriteString(draft.Body)
+
+	return sb.String()
+}

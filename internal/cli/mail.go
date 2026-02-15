@@ -1201,3 +1201,221 @@ func parseQueryToSearchOptions(query string) imap.SearchOptions {
 		Subject: subject,
 	}
 }
+
+// Draft command handlers
+
+func (c *DraftListCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	limit := c.Limit
+	if limit == 0 {
+		limit = ctx.Config.Defaults.Limit
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	ctx.Formatter.Verbosef("Fetching drafts...")
+
+	drafts, err := client.ListDrafts(limit)
+	if err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"mailbox":  "Drafts",
+			"count":    len(drafts),
+			"messages": drafts,
+		})
+	}
+
+	if len(drafts) == 0 {
+		fmt.Println("No drafts")
+		return nil
+	}
+
+	tw := ctx.Formatter.NewTable("ID", "TO", "SUBJECT", "DATE")
+
+	for _, d := range drafts {
+		tw.AddRow(
+			fmt.Sprintf("%d", d.SeqNum),
+			d.From, // From field contains the draft's To header
+			truncate(d.Subject, 40),
+			d.Date,
+		)
+	}
+
+	tw.Flush()
+	return nil
+}
+
+func (c *DraftCreateCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	body := c.Body
+	if body == "" {
+		// Read from stdin if no body provided
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("failed to read stdin: %w", err)
+			}
+			body = string(data)
+		}
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	draft := &imap.Draft{
+		To:      c.To,
+		CC:      c.CC,
+		Subject: c.Subject,
+		Body:    body,
+	}
+
+	uid, err := client.CreateDraft(draft)
+	if err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success": true,
+			"message": "Draft created",
+			"uid":     uid,
+		})
+	}
+
+	ctx.Formatter.PrintSuccess(fmt.Sprintf("Draft created (UID: %d)", uid))
+	return nil
+}
+
+func (c *DraftEditCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	// Get existing draft to merge with new values
+	existing, err := client.GetDraft(c.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get draft: %w", err)
+	}
+
+	// Use new values if provided, otherwise keep existing
+	to := c.To
+	if len(to) == 0 {
+		to = existing.To
+	}
+
+	cc := c.CC
+	if len(cc) == 0 {
+		cc = existing.CC
+	}
+
+	subject := c.Subject
+	if subject == "" {
+		subject = existing.Subject
+	}
+
+	body := c.Body
+	if body == "" {
+		body = existing.TextBody
+	}
+
+	draft := &imap.Draft{
+		To:      to,
+		CC:      cc,
+		Subject: subject,
+		Body:    body,
+	}
+
+	uid, err := client.UpdateDraft(c.ID, draft)
+	if err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success": true,
+			"message": "Draft updated",
+			"uid":     uid,
+		})
+	}
+
+	ctx.Formatter.PrintSuccess(fmt.Sprintf("Draft updated (UID: %d)", uid))
+	return nil
+}
+
+func (c *DraftDeleteCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	if len(c.IDs) == 0 {
+		return fmt.Errorf("no draft IDs specified")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if err := client.DeleteDraft(c.IDs); err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("Deleted %d draft(s)", len(c.IDs)),
+			"ids":     c.IDs,
+		})
+	}
+
+	ctx.Formatter.PrintSuccess(fmt.Sprintf("Deleted %d draft(s)", len(c.IDs)))
+	return nil
+}
+
+// truncate shortens a string to max length with ellipsis
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}

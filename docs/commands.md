@@ -340,6 +340,87 @@ pm-cli mail download 123 0
 pm-cli mail download 123 0 -o ~/Downloads/report.pdf
 ```
 
+### mail draft
+
+Manage email drafts.
+
+#### mail draft list
+
+List all drafts.
+
+```bash
+pm-cli mail draft list
+pm-cli mail draft list -n 50 --json
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-n, --limit` | Number of drafts to show (default: 20) |
+
+#### mail draft create
+
+Create a new draft.
+
+```bash
+pm-cli mail draft create [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-t, --to` | Recipient(s) |
+| `--cc` | CC recipients |
+| `-s, --subject` | Subject line |
+| `-b, --body` | Body text |
+| `-a, --attach` | Attachments |
+
+**Examples:**
+```bash
+pm-cli mail draft create -t user@example.com -s "Meeting notes" -b "Draft content..."
+pm-cli mail draft create -s "Notes" <<< "Body from stdin"
+```
+
+#### mail draft edit
+
+Edit an existing draft.
+
+```bash
+pm-cli mail draft edit <id> [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-t, --to` | New recipient(s) |
+| `--cc` | New CC recipients |
+| `-s, --subject` | New subject line |
+| `-b, --body` | New body text |
+| `-a, --attach` | New attachments |
+
+**Examples:**
+```bash
+# Update subject
+pm-cli mail draft edit 42 -s "Updated subject"
+
+# Update body
+pm-cli mail draft edit 42 -b "New content"
+```
+
+#### mail draft delete
+
+Delete draft(s).
+
+```bash
+pm-cli mail draft delete <id>...
+```
+
+**Examples:**
+```bash
+pm-cli mail draft delete 42
+pm-cli mail draft delete 42 43 44
+```
+
 ---
 
 ## mailbox
