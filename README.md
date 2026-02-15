@@ -161,6 +161,16 @@ Password is stored securely in the system keyring (libsecret on Linux).
 systemctl --user enable --now protonmail-bridge
 ```
 
+## Platform Support
+
+pm-cli works on **Linux, macOS, and Windows** - anywhere Proton Bridge runs. As long as Proton Bridge is installed, logged in, and running, pm-cli will connect to it.
+
+| Platform | Keyring Backend |
+|----------|-----------------|
+| Linux | libsecret (GNOME Keyring, KWallet) |
+| macOS | Keychain |
+| Windows | Windows Credential Manager |
+
 ## License
 
 MIT
