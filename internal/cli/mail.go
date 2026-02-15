@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bscott/pm-cli/internal/config"
 	"github.com/bscott/pm-cli/internal/imap"
 	"github.com/bscott/pm-cli/internal/smtp"
 	"github.com/emersion/go-message/mail"
@@ -264,6 +265,26 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
+	// Check idempotency key
+	if c.IdempotencyKey != "" {
+		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		if err != nil {
+			return fmt.Errorf("idempotency check failed: %w", err)
+		}
+		if used {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success":         true,
+					"message":         "Email already sent (idempotency key matched)",
+					"idempotency_key": c.IdempotencyKey,
+					"duplicate":       true,
+				})
+			}
+			fmt.Println("Email already sent (idempotency key matched).")
+			return nil
+		}
+	}
+
 	body := c.Body
 	if body == "" {
 		// Read from stdin
@@ -305,13 +326,25 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	// Record idempotency key after successful send
+	if c.IdempotencyKey != "" {
+		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
+			// Log but don't fail - email was already sent
+			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		}
+	}
+
 	if ctx.Formatter.JSON {
-		return ctx.Formatter.PrintJSON(map[string]interface{}{
+		result := map[string]interface{}{
 			"success": true,
 			"message": "Email sent successfully",
 			"to":      c.To,
 			"subject": c.Subject,
-		})
+		}
+		if c.IdempotencyKey != "" {
+			result["idempotency_key"] = c.IdempotencyKey
+		}
+		return ctx.Formatter.PrintJSON(result)
 	}
 
 	fmt.Println("Email sent successfully.")
@@ -635,6 +668,26 @@ func (c *MailReplyCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
+	// Check idempotency key
+	if c.IdempotencyKey != "" {
+		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		if err != nil {
+			return fmt.Errorf("idempotency check failed: %w", err)
+		}
+		if used {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success":         true,
+					"message":         "Reply already sent (idempotency key matched)",
+					"idempotency_key": c.IdempotencyKey,
+					"duplicate":       true,
+				})
+			}
+			fmt.Println("Reply already sent (idempotency key matched).")
+			return nil
+		}
+	}
+
 	// Fetch original message
 	client, err := imap.NewClient(ctx.Config)
 	if err != nil {
@@ -745,16 +798,27 @@ func (c *MailReplyCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	// Record idempotency key after successful send
+	if c.IdempotencyKey != "" {
+		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
+			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		}
+	}
+
 	if ctx.Formatter.JSON {
-		return ctx.Formatter.PrintJSON(map[string]interface{}{
-			"success":      true,
-			"message":      "Reply sent successfully",
-			"to":           recipients,
-			"cc":           ccRecipients,
-			"subject":      subject,
-			"in_reply_to":  msg.MessageID,
-			"reply_all":    c.All,
-		})
+		result := map[string]interface{}{
+			"success":     true,
+			"message":     "Reply sent successfully",
+			"to":          recipients,
+			"cc":          ccRecipients,
+			"subject":     subject,
+			"in_reply_to": msg.MessageID,
+			"reply_all":   c.All,
+		}
+		if c.IdempotencyKey != "" {
+			result["idempotency_key"] = c.IdempotencyKey
+		}
+		return ctx.Formatter.PrintJSON(result)
 	}
 
 	fmt.Println("Reply sent successfully.")
@@ -764,6 +828,26 @@ func (c *MailReplyCmd) Run(ctx *Context) error {
 func (c *MailForwardCmd) Run(ctx *Context) error {
 	if ctx.Config.Bridge.Email == "" {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	// Check idempotency key
+	if c.IdempotencyKey != "" {
+		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		if err != nil {
+			return fmt.Errorf("idempotency check failed: %w", err)
+		}
+		if used {
+			if ctx.Formatter.JSON {
+				return ctx.Formatter.PrintJSON(map[string]interface{}{
+					"success":         true,
+					"message":         "Forward already sent (idempotency key matched)",
+					"idempotency_key": c.IdempotencyKey,
+					"duplicate":       true,
+				})
+			}
+			fmt.Println("Forward already sent (idempotency key matched).")
+			return nil
+		}
 	}
 
 	// Fetch original message
@@ -846,15 +930,26 @@ func (c *MailForwardCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	// Record idempotency key after successful send
+	if c.IdempotencyKey != "" {
+		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
+			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		}
+	}
+
 	if ctx.Formatter.JSON {
-		return ctx.Formatter.PrintJSON(map[string]interface{}{
+		result := map[string]interface{}{
 			"success":          true,
 			"message":          "Email forwarded successfully",
 			"to":               c.To,
 			"subject":          subject,
 			"original_from":    msg.From,
 			"original_subject": msg.Subject,
-		})
+		}
+		if c.IdempotencyKey != "" {
+			result["idempotency_key"] = c.IdempotencyKey
+		}
+		return ctx.Formatter.PrintJSON(result)
 	}
 
 	fmt.Println("Email forwarded successfully.")

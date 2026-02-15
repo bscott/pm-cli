@@ -182,8 +182,11 @@ pm-cli mail send [flags]
 | `-s, --subject` | Subject line | Yes |
 | `-b, --body` | Body text | No* |
 | `-a, --attach` | Attachments | No |
+| `--idempotency-key` | Unique key to prevent duplicate sends | No |
 
 *Body can be provided via stdin if not specified.
+
+**Idempotency:** Use `--idempotency-key` to prevent duplicate emails when retrying failed operations. Keys are valid for 24 hours.
 
 **Examples:**
 ```bash
@@ -191,6 +194,9 @@ pm-cli mail send -t user@example.com -s "Hello" -b "Message body"
 pm-cli mail send -t user@example.com -s "Report" -a report.pdf
 echo "Body text" | pm-cli mail send -t user@example.com -s "Subject"
 pm-cli mail send -t a@example.com -t b@example.com -s "Group email" -b "Hi all"
+
+# With idempotency key (for AI agents)
+pm-cli mail send -t user@example.com -s "Order confirmation" --idempotency-key "order-12345"
 ```
 
 ### mail reply
@@ -207,6 +213,7 @@ pm-cli mail reply <id> [flags]
 | `--all` | Reply to all recipients |
 | `-b, --body` | Reply body |
 | `-a, --attach` | Attachments |
+| `--idempotency-key` | Unique key to prevent duplicate sends |
 
 **Examples:**
 ```bash
@@ -235,6 +242,7 @@ pm-cli mail forward <id> [flags]
 | `-t, --to` | Recipient(s) | Yes |
 | `-b, --body` | Additional message | No |
 | `-a, --attach` | Additional attachments | No |
+| `--idempotency-key` | Unique key to prevent duplicate sends | No |
 
 **Examples:**
 ```bash

@@ -1,10 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/zalando/go-keyring"
 	"gopkg.in/yaml.v3"
@@ -153,4 +155,104 @@ func Exists() bool {
 	}
 	_, err = os.Stat(path)
 	return err == nil
+}
+
+// Idempotency support
+
+const idempotencyTTL = 24 * time.Hour
+
+type idempotencyStore struct {
+	Keys map[string]int64 `json:"keys"` // key -> unix timestamp
+}
+
+func idempotencyPath() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "idempotency.json"), nil
+}
+
+func loadIdempotencyStore() (*idempotencyStore, error) {
+	path, err := idempotencyPath()
+	if err != nil {
+		return nil, err
+	}
+
+	store := &idempotencyStore{Keys: make(map[string]int64)}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return store, nil
+		}
+		return nil, err
+	}
+
+	if err := json.Unmarshal(data, store); err != nil {
+		return store, nil // Return empty store on parse error
+	}
+
+	return store, nil
+}
+
+func (s *idempotencyStore) save() error {
+	path, err := idempotencyPath()
+	if err != nil {
+		return err
+	}
+
+	// Clean expired keys
+	now := time.Now().Unix()
+	for key, ts := range s.Keys {
+		if now-ts > int64(idempotencyTTL.Seconds()) {
+			delete(s.Keys, key)
+		}
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0600)
+}
+
+// CheckIdempotencyKey returns true if the key was already used (within TTL)
+func CheckIdempotencyKey(key string) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+
+	store, err := loadIdempotencyStore()
+	if err != nil {
+		return false, err
+	}
+
+	ts, exists := store.Keys[key]
+	if !exists {
+		return false, nil
+	}
+
+	// Check if expired
+	if time.Now().Unix()-ts > int64(idempotencyTTL.Seconds()) {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// RecordIdempotencyKey marks a key as used
+func RecordIdempotencyKey(key string) error {
+	if key == "" {
+		return nil
+	}
+
+	store, err := loadIdempotencyStore()
+	if err != nil {
+		return err
+	}
+
+	store.Keys[key] = time.Now().Unix()
+	return store.save()
 }

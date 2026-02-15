@@ -140,26 +140,29 @@ type MailReadCmd struct {
 }
 
 type MailSendCmd struct {
-	To      []string `help:"Recipient(s)" short:"t" required:""`
-	CC      []string `help:"CC recipients"`
-	BCC     []string `help:"BCC recipients"`
-	Subject string   `help:"Subject line" short:"s" required:""`
-	Body    string   `help:"Body text (or use stdin)" short:"b"`
-	Attach  []string `help:"Attachments" short:"a" type:"existingfile"`
+	To             []string `help:"Recipient(s)" short:"t" required:""`
+	CC             []string `help:"CC recipients"`
+	BCC            []string `help:"BCC recipients"`
+	Subject        string   `help:"Subject line" short:"s" required:""`
+	Body           string   `help:"Body text (or use stdin)" short:"b"`
+	Attach         []string `help:"Attachments" short:"a" type:"existingfile"`
+	IdempotencyKey string   `help:"Unique key to prevent duplicate sends" name:"idempotency-key"`
 }
 
 type MailReplyCmd struct {
-	ID     string   `arg:"" help:"Message ID to reply to"`
-	All    bool     `help:"Reply to all recipients" name:"all"`
-	Body   string   `help:"Reply body" short:"b"`
-	Attach []string `help:"Attachments" short:"a" type:"existingfile"`
+	ID             string   `arg:"" help:"Message ID to reply to"`
+	All            bool     `help:"Reply to all recipients" name:"all"`
+	Body           string   `help:"Reply body" short:"b"`
+	Attach         []string `help:"Attachments" short:"a" type:"existingfile"`
+	IdempotencyKey string   `help:"Unique key to prevent duplicate sends" name:"idempotency-key"`
 }
 
 type MailForwardCmd struct {
-	ID     string   `arg:"" help:"Message ID to forward"`
-	To     []string `help:"Recipient(s)" short:"t" required:""`
-	Body   string   `help:"Additional message" short:"b"`
-	Attach []string `help:"Additional attachments" short:"a" type:"existingfile"`
+	ID             string   `arg:"" help:"Message ID to forward"`
+	To             []string `help:"Recipient(s)" short:"t" required:""`
+	Body           string   `help:"Additional message" short:"b"`
+	Attach         []string `help:"Additional attachments" short:"a" type:"existingfile"`
+	IdempotencyKey string   `help:"Unique key to prevent duplicate sends" name:"idempotency-key"`
 }
 
 type MailDeleteCmd struct {
