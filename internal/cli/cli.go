@@ -55,9 +55,11 @@ func NewContext(globals *Globals) (*Context, error) {
 
 // ConfigCmd handles configuration management
 type ConfigCmd struct {
-	Init ConfigInitCmd `cmd:"" help:"Interactive setup wizard"`
-	Show ConfigShowCmd `cmd:"" help:"Display current configuration"`
-	Set  ConfigSetCmd  `cmd:"" help:"Set a configuration value"`
+	Init     ConfigInitCmd     `cmd:"" help:"Interactive setup wizard"`
+	Show     ConfigShowCmd     `cmd:"" help:"Display current configuration"`
+	Set      ConfigSetCmd      `cmd:"" help:"Set a configuration value"`
+	Validate ConfigValidateCmd `cmd:"" help:"Test Bridge connection"`
+	Doctor   ConfigDoctorCmd   `cmd:"" help:"Diagnose configuration issues"`
 }
 
 type ConfigInitCmd struct{}
@@ -69,15 +71,22 @@ type ConfigSetCmd struct {
 	Value string `arg:"" help:"Value to set"`
 }
 
+type ConfigValidateCmd struct{}
+
+type ConfigDoctorCmd struct{}
+
 // MailCmd handles email operations
 type MailCmd struct {
-	List   MailListCmd   `cmd:"" help:"List messages in mailbox"`
-	Read   MailReadCmd   `cmd:"" help:"Read a specific message"`
-	Send   MailSendCmd   `cmd:"" help:"Compose and send email"`
-	Delete MailDeleteCmd `cmd:"" help:"Delete message(s)"`
-	Move   MailMoveCmd   `cmd:"" help:"Move message to mailbox"`
-	Flag   MailFlagCmd   `cmd:"" help:"Manage message flags"`
-	Search MailSearchCmd `cmd:"" help:"Search messages"`
+	List     MailListCmd     `cmd:"" help:"List messages in mailbox"`
+	Read     MailReadCmd     `cmd:"" help:"Read a specific message"`
+	Send     MailSendCmd     `cmd:"" help:"Compose and send email"`
+	Reply    MailReplyCmd    `cmd:"" help:"Reply to a message"`
+	Forward  MailForwardCmd  `cmd:"" help:"Forward a message"`
+	Delete   MailDeleteCmd   `cmd:"" help:"Delete message(s)"`
+	Move     MailMoveCmd     `cmd:"" help:"Move message to mailbox"`
+	Flag     MailFlagCmd     `cmd:"" help:"Manage message flags"`
+	Search   MailSearchCmd   `cmd:"" help:"Search messages"`
+	Download MailDownloadCmd `cmd:"" help:"Download attachment"`
 }
 
 type MailListCmd struct {
@@ -87,9 +96,10 @@ type MailListCmd struct {
 }
 
 type MailReadCmd struct {
-	ID      string `arg:"" help:"Message ID or sequence number"`
-	Raw     bool   `help:"Show raw message"`
-	Headers bool   `help:"Include all headers"`
+	ID          string `arg:"" help:"Message ID or sequence number"`
+	Raw         bool   `help:"Show raw message"`
+	Headers     bool   `help:"Include all headers"`
+	Attachments bool   `help:"List attachments"`
 }
 
 type MailSendCmd struct {
@@ -101,9 +111,29 @@ type MailSendCmd struct {
 	Attach  []string `help:"Attachments" short:"a" type:"existingfile"`
 }
 
+type MailReplyCmd struct {
+	ID     string   `arg:"" help:"Message ID to reply to"`
+	All    bool     `help:"Reply to all recipients" name:"all"`
+	Body   string   `help:"Reply body" short:"b"`
+	Attach []string `help:"Attachments" short:"a" type:"existingfile"`
+}
+
+type MailForwardCmd struct {
+	ID     string   `arg:"" help:"Message ID to forward"`
+	To     []string `help:"Recipient(s)" short:"t" required:""`
+	Body   string   `help:"Additional message" short:"b"`
+	Attach []string `help:"Additional attachments" short:"a" type:"existingfile"`
+}
+
 type MailDeleteCmd struct {
 	IDs       []string `arg:"" help:"Message ID(s) to delete"`
 	Permanent bool     `help:"Skip trash, delete permanently"`
+}
+
+type MailDownloadCmd struct {
+	ID    string `arg:"" help:"Message ID"`
+	Index int    `arg:"" help:"Attachment index (0-based)"`
+	Out   string `help:"Output path (default: original filename)" short:"o"`
 }
 
 type MailMoveCmd struct {

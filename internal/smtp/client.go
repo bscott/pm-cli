@@ -32,6 +32,8 @@ type Message struct {
 	Subject     string
 	Body        string
 	Attachments []string
+	InReplyTo   string
+	References  string
 }
 
 func NewClient(cfg *config.Config, password string) *Client {
@@ -116,6 +118,12 @@ func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 	}
 	fmt.Fprintf(w, "Subject: %s\r\n", encodeSubject(msg.Subject))
 	fmt.Fprintf(w, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	if msg.InReplyTo != "" {
+		fmt.Fprintf(w, "In-Reply-To: %s\r\n", msg.InReplyTo)
+	}
+	if msg.References != "" {
+		fmt.Fprintf(w, "References: %s\r\n", msg.References)
+	}
 	fmt.Fprintf(w, "MIME-Version: 1.0\r\n")
 
 	if !hasAttachments {

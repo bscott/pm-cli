@@ -34,6 +34,15 @@ type Message struct {
 	Date      string   `json:"date"`
 	Flags     []string `json:"flags"`
 	TextBody  string   `json:"text_body,omitempty"`
-	HTMLBody  string   `json:"html_body,omitempty"`
-	RawBody   []byte   `json:"-"`
+	HTMLBody    string       `json:"html_body,omitempty"`
+	RawBody     []byte       `json:"-"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+type Attachment struct {
+	Index       int    `json:"index"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	Data        []byte `json:"-"`
 }

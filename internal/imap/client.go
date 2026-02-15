@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/emersion/go-imap/v2"
@@ -584,4 +585,313 @@ func formatAddress(addr imap.Address) string {
 
 func readAll(r imap.LiteralReader) ([]byte, error) {
 	return io.ReadAll(r)
+}
+
+// GetAttachments returns a list of attachments for a message without downloading the data
+func (c *Client) GetAttachments(mailbox, id string) ([]Attachment, error) {
+	_, err := c.SelectMailbox(mailbox)
+	if err != nil {
+		return nil, err
+	}
+
+	var seqNum uint32
+	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
+		return nil, fmt.Errorf("invalid message ID: %s", id)
+	}
+
+	seqSet := imap.SeqSetNum(seqNum)
+
+	// Fetch BODYSTRUCTURE to get attachment info
+	fetchOptions := &imap.FetchOptions{
+		BodyStructure: &imap.FetchItemBodyStructure{},
+	}
+
+	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+	defer fetchCmd.Close()
+
+	msg := fetchCmd.Next()
+	if msg == nil {
+		return nil, fmt.Errorf("message not found: %s", id)
+	}
+
+	var attachments []Attachment
+	index := 0
+
+	for {
+		item := msg.Next()
+		if item == nil {
+			break
+		}
+
+		if data, ok := item.(imapclient.FetchItemDataBodyStructure); ok {
+			attachments = extractAttachments(data.BodyStructure, &index, "")
+		}
+	}
+
+	if err := fetchCmd.Close(); err != nil {
+		return nil, fmt.Errorf("fetch failed: %w", err)
+	}
+
+	return attachments, nil
+}
+
+// extractAttachments recursively extracts attachment info from body structure
+func extractAttachments(bs imap.BodyStructure, index *int, partNum string) []Attachment {
+	var attachments []Attachment
+
+	switch s := bs.(type) {
+	case *imap.BodyStructureSinglePart:
+		// Check if this is an attachment (has filename or is not text/html)
+		filename := ""
+		disp := s.Disposition()
+		if disp != nil {
+			if name, ok := disp.Params["filename"]; ok {
+				filename = name
+			}
+		}
+		// Check Content-Type params for name
+		if filename == "" {
+			if name, ok := s.Params["name"]; ok {
+				filename = name
+			}
+		}
+
+		// Include as attachment if it has a filename or disposition is attachment
+		isAttachment := filename != "" ||
+			(disp != nil && disp.Value == "attachment")
+
+		// Also include non-text parts that aren't inline
+		if !isAttachment && s.Type != "text" {
+			isAttachment = disp == nil || disp.Value != "inline"
+		}
+
+		if isAttachment {
+			att := Attachment{
+				Index:       *index,
+				Filename:    filename,
+				ContentType: fmt.Sprintf("%s/%s", s.Type, s.Subtype),
+				Size:        int64(s.Size),
+			}
+			if att.Filename == "" {
+				att.Filename = fmt.Sprintf("attachment_%d", *index)
+			}
+			attachments = append(attachments, att)
+			*index++
+		}
+
+	case *imap.BodyStructureMultiPart:
+		for i, child := range s.Children {
+			childPart := fmt.Sprintf("%d", i+1)
+			if partNum != "" {
+				childPart = fmt.Sprintf("%s.%d", partNum, i+1)
+			}
+			attachments = append(attachments, extractAttachments(child, index, childPart)...)
+		}
+	}
+
+	return attachments
+}
+
+// DownloadAttachment downloads a specific attachment by index
+func (c *Client) DownloadAttachment(mailbox, id string, index int) ([]byte, string, error) {
+	_, err := c.SelectMailbox(mailbox)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var seqNum uint32
+	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
+		return nil, "", fmt.Errorf("invalid message ID: %s", id)
+	}
+
+	seqSet := imap.SeqSetNum(seqNum)
+
+	// First get the body structure to find the attachment part
+	fetchOptions := &imap.FetchOptions{
+		BodyStructure: &imap.FetchItemBodyStructure{},
+	}
+
+	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+
+	msg := fetchCmd.Next()
+	if msg == nil {
+		fetchCmd.Close()
+		return nil, "", fmt.Errorf("message not found: %s", id)
+	}
+
+	var bodyStruct imap.BodyStructure
+	for {
+		item := msg.Next()
+		if item == nil {
+			break
+		}
+		if data, ok := item.(imapclient.FetchItemDataBodyStructure); ok {
+			bodyStruct = data.BodyStructure
+		}
+	}
+	fetchCmd.Close()
+
+	if bodyStruct == nil {
+		return nil, "", fmt.Errorf("could not get message structure")
+	}
+
+	// Find the attachment part number
+	partInfo := findAttachmentPart(bodyStruct, index, "", 0)
+	if partInfo == nil {
+		return nil, "", fmt.Errorf("attachment index %d not found", index)
+	}
+
+	// Fetch the specific part
+	section := &imap.FetchItemBodySection{
+		Part: partInfo.partNums,
+	}
+
+	fetchOptions2 := &imap.FetchOptions{
+		BodySection: []*imap.FetchItemBodySection{section},
+	}
+
+	fetchCmd2 := c.client.Fetch(seqSet, fetchOptions2)
+	defer fetchCmd2.Close()
+
+	msg2 := fetchCmd2.Next()
+	if msg2 == nil {
+		return nil, "", fmt.Errorf("message not found: %s", id)
+	}
+
+	var data []byte
+	for {
+		item := msg2.Next()
+		if item == nil {
+			break
+		}
+		if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok {
+			data, _ = io.ReadAll(bodyData.Literal)
+		}
+	}
+
+	if err := fetchCmd2.Close(); err != nil {
+		return nil, "", fmt.Errorf("fetch failed: %w", err)
+	}
+
+	return data, partInfo.filename, nil
+}
+
+type attachmentPartInfo struct {
+	partNums []int
+	filename string
+}
+
+// findAttachmentPart finds the MIME part numbers for the attachment at the given index
+func findAttachmentPart(bs imap.BodyStructure, targetIndex int, partNum string, currentIndex int) *attachmentPartInfo {
+	switch s := bs.(type) {
+	case *imap.BodyStructureSinglePart:
+		filename := ""
+		disp := s.Disposition()
+		if disp != nil {
+			if name, ok := disp.Params["filename"]; ok {
+				filename = name
+			}
+		}
+		if filename == "" {
+			if name, ok := s.Params["name"]; ok {
+				filename = name
+			}
+		}
+
+		isAttachment := filename != "" ||
+			(disp != nil && disp.Value == "attachment")
+
+		if !isAttachment && s.Type != "text" {
+			isAttachment = disp == nil || disp.Value != "inline"
+		}
+
+		if isAttachment {
+			if currentIndex == targetIndex {
+				if filename == "" {
+					filename = fmt.Sprintf("attachment_%d", targetIndex)
+				}
+				// Parse part numbers from partNum string
+				var partNums []int
+				if partNum != "" {
+					parts := splitPartNum(partNum)
+					partNums = parts
+				}
+				return &attachmentPartInfo{
+					partNums: partNums,
+					filename: filename,
+				}
+			}
+		}
+
+	case *imap.BodyStructureMultiPart:
+		idx := currentIndex
+		for i, child := range s.Children {
+			childPart := fmt.Sprintf("%d", i+1)
+			if partNum != "" {
+				childPart = fmt.Sprintf("%s.%d", partNum, i+1)
+			}
+
+			// Count attachments in this child
+			childCount := countAttachments(child)
+
+			result := findAttachmentPart(child, targetIndex, childPart, idx)
+			if result != nil {
+				return result
+			}
+			idx += childCount
+		}
+	}
+
+	return nil
+}
+
+// countAttachments counts the number of attachments in a body structure
+func countAttachments(bs imap.BodyStructure) int {
+	count := 0
+	switch s := bs.(type) {
+	case *imap.BodyStructureSinglePart:
+		filename := ""
+		disp := s.Disposition()
+		if disp != nil {
+			if name, ok := disp.Params["filename"]; ok {
+				filename = name
+			}
+		}
+		if filename == "" {
+			if name, ok := s.Params["name"]; ok {
+				filename = name
+			}
+		}
+
+		isAttachment := filename != "" ||
+			(disp != nil && disp.Value == "attachment")
+
+		if !isAttachment && s.Type != "text" {
+			isAttachment = disp == nil || disp.Value != "inline"
+		}
+
+		if isAttachment {
+			count++
+		}
+
+	case *imap.BodyStructureMultiPart:
+		for _, child := range s.Children {
+			count += countAttachments(child)
+		}
+	}
+	return count
+}
+
+// splitPartNum converts "1.2.3" to []int{1, 2, 3}
+func splitPartNum(s string) []int {
+	if s == "" {
+		return nil
+	}
+	var parts []int
+	for _, p := range strings.Split(s, ".") {
+		var n int
+		fmt.Sscanf(p, "%d", &n)
+		parts = append(parts, n)
+	}
+	return parts
 }

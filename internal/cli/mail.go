@@ -118,6 +118,40 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 	}
 	defer client.Close()
 
+	// Handle --attachments flag: list attachments only
+	if c.Attachments {
+		attachments, err := client.GetAttachments(ctx.Config.Defaults.Mailbox, c.ID)
+		if err != nil {
+			return err
+		}
+
+		if ctx.Formatter.JSON {
+			return ctx.Formatter.PrintJSON(map[string]interface{}{
+				"message_id":  c.ID,
+				"attachments": attachments,
+				"count":       len(attachments),
+			})
+		}
+
+		if len(attachments) == 0 {
+			fmt.Println("No attachments found.")
+			return nil
+		}
+
+		fmt.Printf("Attachments (%d):\n\n", len(attachments))
+		table := ctx.Formatter.NewTable("INDEX", "FILENAME", "TYPE", "SIZE")
+		for _, att := range attachments {
+			table.AddRow(
+				fmt.Sprintf("%d", att.Index),
+				att.Filename,
+				att.ContentType,
+				formatSize(att.Size),
+			)
+		}
+		table.Flush()
+		return nil
+	}
+
 	msg, err := client.GetMessage(ctx.Config.Defaults.Mailbox, c.ID)
 	if err != nil {
 		return err
@@ -448,6 +482,262 @@ func (c *MailSearchCmd) Run(ctx *Context) error {
 	return nil
 }
 
+func (c *MailReplyCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	// Fetch original message
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	msg, err := client.GetMessage(ctx.Config.Defaults.Mailbox, c.ID)
+	if err != nil {
+		return err
+	}
+
+	// Build reply subject
+	subject := msg.Subject
+	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+		subject = "Re: " + subject
+	}
+
+	// Determine recipients
+	var recipients []string
+	replyTo := extractEmailAddress(msg.From)
+	recipients = append(recipients, replyTo)
+
+	var ccRecipients []string
+	if c.All {
+		// Add all original To recipients except ourselves
+		for _, to := range msg.To {
+			addr := extractEmailAddress(to)
+			if addr != ctx.Config.Bridge.Email && addr != replyTo {
+				recipients = append(recipients, addr)
+			}
+		}
+		// Add original CC recipients
+		for _, cc := range msg.CC {
+			addr := extractEmailAddress(cc)
+			if addr != ctx.Config.Bridge.Email && addr != replyTo {
+				ccRecipients = append(ccRecipients, addr)
+			}
+		}
+	}
+
+	// Get the body text from original message
+	textBody, htmlBody := parseMessageBody(msg.RawBody)
+	originalBody := textBody
+	if originalBody == "" && htmlBody != "" {
+		originalBody = htmlToText(htmlBody)
+	}
+
+	// Build quoted body
+	var quotedLines []string
+	for _, line := range strings.Split(originalBody, "\n") {
+		quotedLines = append(quotedLines, "> "+line)
+	}
+	quotedBody := strings.Join(quotedLines, "\n")
+
+	// Construct full body with reply text
+	body := c.Body
+	if body == "" {
+		// Read from stdin if available
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			scanner := bufio.NewScanner(os.Stdin)
+			var lines []string
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+			body = strings.Join(lines, "\n")
+		}
+	}
+
+	if body == "" {
+		return fmt.Errorf("no reply body provided - use --body or pipe via stdin")
+	}
+
+	fullBody := body + "\n\nOn " + msg.Date + ", " + msg.From + " wrote:\n" + quotedBody
+
+	// Build references header
+	references := msg.MessageID
+	if msg.MessageID != "" {
+		references = msg.MessageID
+	}
+
+	password, err := ctx.Config.GetPassword()
+	if err != nil {
+		return err
+	}
+
+	smtpClient := smtp.NewClient(ctx.Config, password)
+
+	replyMsg := &smtp.Message{
+		From:        ctx.Config.Bridge.Email,
+		To:          recipients,
+		CC:          ccRecipients,
+		Subject:     subject,
+		Body:        fullBody,
+		Attachments: c.Attach,
+		InReplyTo:   msg.MessageID,
+		References:  references,
+	}
+
+	ctx.Formatter.Verbosef("Sending reply to %s...", strings.Join(recipients, ", "))
+
+	if err := smtpClient.Send(replyMsg); err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success":      true,
+			"message":      "Reply sent successfully",
+			"to":           recipients,
+			"cc":           ccRecipients,
+			"subject":      subject,
+			"in_reply_to":  msg.MessageID,
+			"reply_all":    c.All,
+		})
+	}
+
+	fmt.Println("Reply sent successfully.")
+	return nil
+}
+
+func (c *MailForwardCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	// Fetch original message
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	msg, err := client.GetMessage(ctx.Config.Defaults.Mailbox, c.ID)
+	if err != nil {
+		return err
+	}
+
+	// Build forward subject
+	subject := msg.Subject
+	if !strings.HasPrefix(strings.ToLower(subject), "fwd:") {
+		subject = "Fwd: " + subject
+	}
+
+	// Get the body text from original message
+	textBody, htmlBody := parseMessageBody(msg.RawBody)
+	originalBody := textBody
+	if originalBody == "" && htmlBody != "" {
+		originalBody = htmlToText(htmlBody)
+	}
+
+	// Build forwarded message body
+	forwardHeader := "---------- Forwarded message ----------\n"
+	forwardHeader += "From: " + msg.From + "\n"
+	forwardHeader += "Date: " + msg.Date + "\n"
+	forwardHeader += "Subject: " + msg.Subject + "\n"
+	forwardHeader += "To: " + strings.Join(msg.To, ", ") + "\n"
+	forwardHeader += "\n"
+
+	// Add user's message if provided
+	body := c.Body
+	if body == "" {
+		// Read from stdin if available
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			scanner := bufio.NewScanner(os.Stdin)
+			var lines []string
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+			body = strings.Join(lines, "\n")
+		}
+	}
+
+	var fullBody string
+	if body != "" {
+		fullBody = body + "\n\n" + forwardHeader + originalBody
+	} else {
+		fullBody = forwardHeader + originalBody
+	}
+
+	password, err := ctx.Config.GetPassword()
+	if err != nil {
+		return err
+	}
+
+	smtpClient := smtp.NewClient(ctx.Config, password)
+
+	fwdMsg := &smtp.Message{
+		From:        ctx.Config.Bridge.Email,
+		To:          c.To,
+		Subject:     subject,
+		Body:        fullBody,
+		Attachments: c.Attach,
+	}
+
+	ctx.Formatter.Verbosef("Forwarding email to %s...", strings.Join(c.To, ", "))
+
+	if err := smtpClient.Send(fwdMsg); err != nil {
+		return err
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success":          true,
+			"message":          "Email forwarded successfully",
+			"to":               c.To,
+			"subject":          subject,
+			"original_from":    msg.From,
+			"original_subject": msg.Subject,
+		})
+	}
+
+	fmt.Println("Email forwarded successfully.")
+	return nil
+}
+
+// formatSize returns a human-readable size string
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// extractEmailAddress extracts the email address from a formatted address string.
+// For example, "John Doe <john@example.com>" returns "john@example.com"
+func extractEmailAddress(addr string) string {
+	if idx := strings.Index(addr, "<"); idx != -1 {
+		if endIdx := strings.Index(addr, ">"); endIdx != -1 {
+			return addr[idx+1 : endIdx]
+		}
+	}
+	return strings.TrimSpace(addr)
+}
+
 func parseMessageBody(rawBody []byte) (textBody, htmlBody string) {
 	reader, err := mail.CreateReader(bytes.NewReader(rawBody))
 	if err != nil {
@@ -547,4 +837,116 @@ func htmlToText(htmlContent string) string {
 	text = reNewlines.ReplaceAllString(text, "\n\n")
 
 	return strings.TrimSpace(text)
+}
+
+func (c *MailDownloadCmd) Run(ctx *Context) error {
+	if ctx.Config.Bridge.Email == "" {
+		return fmt.Errorf("not configured - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		return err
+	}
+
+	if err := client.Connect(); err != nil {
+		return err
+	}
+	defer client.Close()
+
+	msg, err := client.GetMessage(ctx.Config.Defaults.Mailbox, c.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get message: %w", err)
+	}
+
+	// Parse attachments from raw body
+	attachments := parseAttachments(msg.RawBody)
+	if len(attachments) == 0 {
+		return fmt.Errorf("no attachments found in message %s", c.ID)
+	}
+
+	if c.Index < 0 || c.Index >= len(attachments) {
+		return fmt.Errorf("invalid attachment index %d (message has %d attachments)", c.Index, len(attachments))
+	}
+
+	attachment := attachments[c.Index]
+
+	// Determine output path
+	outPath := c.Out
+	if outPath == "" {
+		outPath = attachment.Filename
+		if outPath == "" {
+			outPath = fmt.Sprintf("attachment_%d", c.Index)
+		}
+	}
+
+	// Write file
+	if err := os.WriteFile(outPath, attachment.Data, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success":      true,
+			"filename":     attachment.Filename,
+			"content_type": attachment.ContentType,
+			"size":         len(attachment.Data),
+			"output_path":  outPath,
+		})
+	}
+
+	fmt.Printf("Saved %s (%d bytes) to %s\n", attachment.Filename, len(attachment.Data), outPath)
+	return nil
+}
+
+func parseAttachments(rawBody []byte) []imap.Attachment {
+	var attachments []imap.Attachment
+	reader, err := mail.CreateReader(bytes.NewReader(rawBody))
+	if err != nil {
+		return nil
+	}
+	defer reader.Close()
+
+	index := 0
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			break
+		}
+
+		contentType := part.Header.Get("Content-Type")
+		contentDisposition := part.Header.Get("Content-Disposition")
+
+		// Check if this is an attachment
+		if strings.Contains(contentDisposition, "attachment") ||
+			(contentDisposition != "" && !strings.HasPrefix(contentType, "text/")) {
+			// Extract filename
+			filename := ""
+			if strings.Contains(contentDisposition, "filename=") {
+				re := regexp.MustCompile(`filename="?([^";]+)"?`)
+				if matches := re.FindStringSubmatch(contentDisposition); len(matches) > 1 {
+					filename = matches[1]
+				}
+			}
+
+			data, err := io.ReadAll(part.Body)
+			if err != nil {
+				continue
+			}
+
+			attachments = append(attachments, imap.Attachment{
+				Index:       index,
+				Filename:    filename,
+				ContentType: contentType,
+				Size:        int64(len(data)),
+				Data:        data,
+			})
+			index++
+		}
+	}
+
+	return attachments
 }

@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/smtp"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
+	"github.com/bscott/pm-cli/internal/imap"
 	"golang.org/x/term"
 )
 
@@ -224,5 +229,237 @@ func (c *ConfigSetCmd) Run(ctx *Context) error {
 	}
 
 	ctx.Formatter.PrintSuccess(fmt.Sprintf("Set %s = %s", c.Key, c.Value))
+	return nil
+}
+
+func (c *ConfigValidateCmd) Run(ctx *Context) error {
+	if ctx.Config == nil {
+		return fmt.Errorf("no configuration found - run 'pm-cli config init' first")
+	}
+
+	client, err := imap.NewClient(ctx.Config)
+	if err != nil {
+		if ctx.Formatter.JSON {
+			return ctx.Formatter.PrintJSON(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+		}
+		return fmt.Errorf("failed to create IMAP client: %w", err)
+	}
+
+	if err := client.Connect(); err != nil {
+		if ctx.Formatter.JSON {
+			return ctx.Formatter.PrintJSON(map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+		}
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	defer client.Close()
+
+	if ctx.Formatter.JSON {
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"success": true,
+			"message": "Successfully connected and authenticated to Proton Bridge",
+		})
+	}
+
+	fmt.Println("Connection successful! Proton Bridge is working correctly.")
+	return nil
+}
+
+func (c *ConfigDoctorCmd) Run(ctx *Context) error {
+	type checkResult struct {
+		Name    string `json:"name"`
+		Status  string `json:"status"`
+		Message string `json:"message,omitempty"`
+	}
+
+	var results []checkResult
+
+	addResult := func(name, status, message string) {
+		results = append(results, checkResult{
+			Name:    name,
+			Status:  status,
+			Message: message,
+		})
+	}
+
+	printResult := func(status, name, message string) {
+		if ctx.Formatter.JSON {
+			return
+		}
+		prefix := "[OK]"
+		if status == "fail" {
+			prefix = "[FAIL]"
+		}
+		if message != "" {
+			fmt.Printf("%s %s - %s\n", prefix, name, message)
+		} else {
+			fmt.Printf("%s %s\n", prefix, name)
+		}
+	}
+
+	// Check 1: Config file exists
+	configPath, err := config.ConfigPath()
+	if err != nil {
+		addResult("Config file exists", "fail", err.Error())
+		printResult("fail", "Config file exists", err.Error())
+	} else if !config.Exists() {
+		addResult("Config file exists", "fail", fmt.Sprintf("not found at %s", configPath))
+		printResult("fail", "Config file exists", fmt.Sprintf("not found at %s", configPath))
+	} else {
+		addResult("Config file exists", "ok", "")
+		printResult("ok", "Config file exists", "")
+	}
+
+	// Check 2: Config file is valid YAML
+	var cfg *config.Config
+	if config.Exists() {
+		cfg, err = config.Load("")
+		if err != nil {
+			addResult("Config valid", "fail", err.Error())
+			printResult("fail", "Config valid", err.Error())
+		} else {
+			addResult("Config valid", "ok", "")
+			printResult("ok", "Config valid", "")
+		}
+	}
+
+	// Use provided config if loading failed
+	if cfg == nil {
+		cfg = ctx.Config
+	}
+
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+
+	// Check 3: Email is configured
+	if cfg.Bridge.Email == "" {
+		addResult("Email configured", "fail", "no email address set")
+		printResult("fail", "Email configured", "no email address set")
+	} else {
+		addResult("Email configured", "ok", cfg.Bridge.Email)
+		printResult("ok", fmt.Sprintf("Email configured: %s", cfg.Bridge.Email), "")
+	}
+
+	// Check 4: Password exists in keyring
+	if cfg.Bridge.Email != "" {
+		_, err := cfg.GetPassword()
+		if err != nil {
+			addResult("Password in keyring", "fail", "password not found in keyring")
+			printResult("fail", "Password in keyring", "password not found in keyring")
+		} else {
+			addResult("Password in keyring", "ok", "")
+			printResult("ok", "Password in keyring", "")
+		}
+	} else {
+		addResult("Password in keyring", "fail", "cannot check - email not configured")
+		printResult("fail", "Password in keyring", "cannot check - email not configured")
+	}
+
+	// Check 5: IMAP port is reachable
+	imapAddr := fmt.Sprintf("%s:%d", cfg.Bridge.IMAPHost, cfg.Bridge.IMAPPort)
+	conn, err := net.DialTimeout("tcp", imapAddr, 5*time.Second)
+	if err != nil {
+		addResult("IMAP port reachable", "fail", fmt.Sprintf("cannot connect to %s - is Proton Bridge running?", imapAddr))
+		printResult("fail", fmt.Sprintf("IMAP port reachable (%s)", imapAddr), "is Proton Bridge running?")
+	} else {
+		conn.Close()
+		addResult("IMAP port reachable", "ok", imapAddr)
+		printResult("ok", fmt.Sprintf("IMAP port reachable (%s)", imapAddr), "")
+	}
+
+	// Check 6: SMTP port is reachable
+	smtpAddr := fmt.Sprintf("%s:%d", cfg.Bridge.SMTPHost, cfg.Bridge.SMTPPort)
+	conn, err = net.DialTimeout("tcp", smtpAddr, 5*time.Second)
+	if err != nil {
+		addResult("SMTP port reachable", "fail", fmt.Sprintf("cannot connect to %s - is Proton Bridge running?", smtpAddr))
+		printResult("fail", fmt.Sprintf("SMTP port reachable (%s)", smtpAddr), "is Proton Bridge running?")
+	} else {
+		conn.Close()
+		addResult("SMTP port reachable", "ok", smtpAddr)
+		printResult("ok", fmt.Sprintf("SMTP port reachable (%s)", smtpAddr), "")
+	}
+
+	// Check 7: IMAP login succeeds
+	if cfg.Bridge.Email != "" {
+		imapClient, err := imap.NewClient(cfg)
+		if err != nil {
+			addResult("IMAP login succeeds", "fail", err.Error())
+			printResult("fail", "IMAP login succeeds", err.Error())
+		} else {
+			err = imapClient.Connect()
+			if err != nil {
+				addResult("IMAP login succeeds", "fail", err.Error())
+				printResult("fail", "IMAP login succeeds", err.Error())
+			} else {
+				imapClient.Close()
+				addResult("IMAP login succeeds", "ok", "")
+				printResult("ok", "IMAP login succeeds", "")
+			}
+		}
+	} else {
+		addResult("IMAP login succeeds", "fail", "cannot test - email not configured")
+		printResult("fail", "IMAP login succeeds", "cannot test - email not configured")
+	}
+
+	// Check 8: SMTP connection succeeds
+	if cfg.Bridge.Email != "" {
+		password, err := cfg.GetPassword()
+		if err == nil {
+			conn, err := net.DialTimeout("tcp", smtpAddr, 5*time.Second)
+			if err != nil {
+				addResult("SMTP connection succeeds", "fail", err.Error())
+				printResult("fail", "SMTP connection succeeds", err.Error())
+			} else {
+				tlsConfig := &tls.Config{
+					InsecureSkipVerify: true,
+					ServerName:         cfg.Bridge.SMTPHost,
+				}
+				tlsConn := tls.Client(conn, tlsConfig)
+				client, err := smtp.NewClient(tlsConn, cfg.Bridge.SMTPHost)
+				if err != nil {
+					conn.Close()
+					addResult("SMTP connection succeeds", "fail", err.Error())
+					printResult("fail", "SMTP connection succeeds", err.Error())
+				} else {
+					auth := smtp.PlainAuth("", cfg.Bridge.Email, password, cfg.Bridge.SMTPHost)
+					if err := client.Auth(auth); err != nil {
+						addResult("SMTP connection succeeds", "fail", err.Error())
+						printResult("fail", "SMTP connection succeeds", err.Error())
+					} else {
+						addResult("SMTP connection succeeds", "ok", "")
+						printResult("ok", "SMTP connection succeeds", "")
+					}
+					client.Close()
+				}
+			}
+		} else {
+			addResult("SMTP connection succeeds", "fail", "cannot test - password not available")
+			printResult("fail", "SMTP connection succeeds", "cannot test - password not available")
+		}
+	} else {
+		addResult("SMTP connection succeeds", "fail", "cannot test - email not configured")
+		printResult("fail", "SMTP connection succeeds", "cannot test - email not configured")
+	}
+
+	if ctx.Formatter.JSON {
+		allOk := true
+		for _, r := range results {
+			if r.Status == "fail" {
+				allOk = false
+				break
+			}
+		}
+		return ctx.Formatter.PrintJSON(map[string]interface{}{
+			"checks":  results,
+			"healthy": allOk,
+		})
+	}
+
 	return nil
 }
