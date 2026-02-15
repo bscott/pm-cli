@@ -9,20 +9,73 @@ import (
 	"text/tabwriter"
 )
 
+// ANSI color codes
+const (
+	Reset   = "\033[0m"
+	Bold    = "\033[1m"
+	Red     = "\033[31m"
+	Green   = "\033[32m"
+	Yellow  = "\033[33m"
+	Blue    = "\033[34m"
+	Magenta = "\033[35m"
+	Cyan    = "\033[36m"
+	Gray    = "\033[90m"
+)
+
 type Formatter struct {
 	JSON    bool
 	Verbose bool
 	Quiet   bool
+	NoColor bool
 	Writer  io.Writer
 }
 
-func New(jsonOutput, verbose, quiet bool) *Formatter {
+func New(jsonOutput, verbose, quiet, noColor bool) *Formatter {
 	return &Formatter{
 		JSON:    jsonOutput,
 		Verbose: verbose,
 		Quiet:   quiet,
+		NoColor: noColor,
 		Writer:  os.Stdout,
 	}
+}
+
+// Color wraps text in ANSI color codes if colors are enabled
+func (f *Formatter) Color(color, text string) string {
+	if f.NoColor || f.JSON {
+		return text
+	}
+	return color + text + Reset
+}
+
+// Bold wraps text in bold if colors are enabled
+func (f *Formatter) Bold(text string) string {
+	return f.Color(Bold, text)
+}
+
+// Success color (green)
+func (f *Formatter) SuccessText(text string) string {
+	return f.Color(Green, text)
+}
+
+// Error color (red)
+func (f *Formatter) ErrorText(text string) string {
+	return f.Color(Red, text)
+}
+
+// Warning color (yellow)
+func (f *Formatter) WarningText(text string) string {
+	return f.Color(Yellow, text)
+}
+
+// Info color (cyan)
+func (f *Formatter) InfoText(text string) string {
+	return f.Color(Cyan, text)
+}
+
+// Muted color (gray)
+func (f *Formatter) MutedText(text string) string {
+	return f.Color(Gray, text)
 }
 
 func (f *Formatter) Print(v interface{}) error {
@@ -47,7 +100,7 @@ func (f *Formatter) PrintError(err error) {
 		})
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	fmt.Fprintf(os.Stderr, "%s %s\n", f.ErrorText("Error:"), err)
 }
 
 func (f *Formatter) PrintSuccess(message string) {
@@ -61,27 +114,35 @@ func (f *Formatter) PrintSuccess(message string) {
 		})
 		return
 	}
-	fmt.Fprintln(f.Writer, message)
+	fmt.Fprintln(f.Writer, f.SuccessText("✓")+" "+message)
 }
 
 func (f *Formatter) Verbosef(format string, args ...interface{}) {
 	if f.Verbose && !f.Quiet {
-		fmt.Fprintf(f.Writer, format+"\n", args...)
+		msg := fmt.Sprintf(format, args...)
+		fmt.Fprintln(f.Writer, f.MutedText(msg))
 	}
 }
 
 type TableWriter struct {
-	w       *tabwriter.Writer
-	headers []string
+	w         *tabwriter.Writer
+	headers   []string
+	formatter *Formatter
 }
 
 func (f *Formatter) NewTable(headers ...string) *TableWriter {
 	tw := &TableWriter{
-		w:       tabwriter.NewWriter(f.Writer, 0, 0, 2, ' ', 0),
-		headers: headers,
+		w:         tabwriter.NewWriter(f.Writer, 0, 0, 2, ' ', 0),
+		headers:   headers,
+		formatter: f,
 	}
 	if len(headers) > 0 {
-		fmt.Fprintln(tw.w, strings.Join(headers, "\t"))
+		// Bold headers
+		coloredHeaders := make([]string, len(headers))
+		for i, h := range headers {
+			coloredHeaders[i] = f.Bold(h)
+		}
+		fmt.Fprintln(tw.w, strings.Join(coloredHeaders, "\t"))
 	}
 	return tw
 }
@@ -118,6 +179,6 @@ func (f *Formatter) Error(err error) error {
 			Error:   err.Error(),
 		})
 	}
-	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	fmt.Fprintf(os.Stderr, "%s %s\n", f.ErrorText("Error:"), err)
 	return err
 }

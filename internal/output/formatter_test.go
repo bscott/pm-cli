@@ -24,7 +24,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := New(tt.json, tt.verbose, tt.quiet)
+			f := New(tt.json, tt.verbose, tt.quiet, false)
 			if f == nil {
 				t.Fatal("expected non-nil formatter")
 			}
@@ -68,7 +68,7 @@ func TestPrint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			f := New(tt.json, false, false)
+			f := New(tt.json, false, false, false)
 			f.Writer = &buf
 
 			err := f.Print(tt.input)
@@ -109,7 +109,7 @@ func TestPrintJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			f := New(true, false, false)
+			f := New(true, false, false, false)
 			f.Writer = &buf
 
 			err := f.PrintJSON(tt.input)
@@ -131,7 +131,7 @@ func TestPrintError(t *testing.T) {
 
 	t.Run("text mode", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		f.PrintError(testErr)
@@ -142,7 +142,7 @@ func TestPrintError(t *testing.T) {
 
 	t.Run("json mode", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(true, false, false)
+		f := New(true, false, false, false)
 		f.Writer = &buf
 
 		f.PrintError(testErr)
@@ -164,7 +164,7 @@ func TestPrintError(t *testing.T) {
 func TestPrintSuccess(t *testing.T) {
 	t.Run("quiet mode suppresses output", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, true)
+		f := New(false, false, true, false)
 		f.Writer = &buf
 
 		f.PrintSuccess("should not appear")
@@ -176,7 +176,7 @@ func TestPrintSuccess(t *testing.T) {
 
 	t.Run("text mode prints message", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		f.PrintSuccess("operation successful")
@@ -188,7 +188,7 @@ func TestPrintSuccess(t *testing.T) {
 
 	t.Run("json mode prints JSON", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(true, false, false)
+		f := New(true, false, false, false)
 		f.Writer = &buf
 
 		f.PrintSuccess("operation successful")
@@ -210,7 +210,7 @@ func TestPrintSuccess(t *testing.T) {
 func TestVerbosef(t *testing.T) {
 	t.Run("verbose mode prints", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, true, false)
+		f := New(false, true, false, false)
 		f.Writer = &buf
 
 		f.Verbosef("verbose message: %s", "test")
@@ -222,7 +222,7 @@ func TestVerbosef(t *testing.T) {
 
 	t.Run("non-verbose mode suppresses", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		f.Verbosef("should not appear: %s", "test")
@@ -234,7 +234,7 @@ func TestVerbosef(t *testing.T) {
 
 	t.Run("quiet mode overrides verbose", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, true, true)
+		f := New(false, true, true, false)
 		f.Writer = &buf
 
 		f.Verbosef("should not appear: %s", "test")
@@ -248,7 +248,7 @@ func TestVerbosef(t *testing.T) {
 func TestTableWriter(t *testing.T) {
 	t.Run("creates table with headers", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		table := f.NewTable("NAME", "AGE", "CITY")
@@ -270,7 +270,7 @@ func TestTableWriter(t *testing.T) {
 
 	t.Run("empty headers", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		table := f.NewTable()
@@ -287,7 +287,7 @@ func TestTableWriter(t *testing.T) {
 func TestSuccess(t *testing.T) {
 	t.Run("json mode returns data", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(true, false, false)
+		f := New(true, false, false, false)
 		f.Writer = &buf
 
 		data := map[string]string{"key": "value"}
@@ -308,7 +308,7 @@ func TestSuccess(t *testing.T) {
 
 	t.Run("text mode returns nil", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		err := f.Success(map[string]string{"key": "value"})
@@ -328,7 +328,7 @@ func TestError(t *testing.T) {
 
 	t.Run("json mode prints error response", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(true, false, false)
+		f := New(true, false, false, false)
 		f.Writer = &buf
 
 		// In JSON mode, Error() returns the result of PrintJSON (nil on success)
@@ -353,7 +353,7 @@ func TestError(t *testing.T) {
 
 	t.Run("text mode returns error", func(t *testing.T) {
 		var buf bytes.Buffer
-		f := New(false, false, false)
+		f := New(false, false, false, false)
 		f.Writer = &buf
 
 		err := f.Error(testErr)
@@ -387,4 +387,73 @@ func TestJSONResponseStruct(t *testing.T) {
 	if result.Message != resp.Message {
 		t.Errorf("Message = %v, want %v", result.Message, resp.Message)
 	}
+}
+
+func TestColor(t *testing.T) {
+	t.Run("colors enabled", func(t *testing.T) {
+		f := New(false, false, false, false)
+		result := f.Color(Red, "test")
+		if result != Red+"test"+Reset {
+			t.Errorf("expected colored text, got %q", result)
+		}
+	})
+
+	t.Run("colors disabled via NoColor", func(t *testing.T) {
+		f := New(false, false, false, true)
+		result := f.Color(Red, "test")
+		if result != "test" {
+			t.Errorf("expected plain text with NoColor, got %q", result)
+		}
+	})
+
+	t.Run("colors disabled in JSON mode", func(t *testing.T) {
+		f := New(true, false, false, false)
+		result := f.Color(Red, "test")
+		if result != "test" {
+			t.Errorf("expected plain text in JSON mode, got %q", result)
+		}
+	})
+}
+
+func TestColorHelpers(t *testing.T) {
+	f := New(false, false, false, false)
+
+	tests := []struct {
+		name     string
+		fn       func(string) string
+		expected string
+	}{
+		{"Bold", f.Bold, Bold + "test" + Reset},
+		{"SuccessText", f.SuccessText, Green + "test" + Reset},
+		{"ErrorText", f.ErrorText, Red + "test" + Reset},
+		{"WarningText", f.WarningText, Yellow + "test" + Reset},
+		{"InfoText", f.InfoText, Cyan + "test" + Reset},
+		{"MutedText", f.MutedText, Gray + "test" + Reset},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.fn("test")
+			if result != tt.expected {
+				t.Errorf("%s() = %q, want %q", tt.name, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNoColorEnv(t *testing.T) {
+	// Test that the NoColor flag is properly set in Formatter
+	t.Run("NoColor false", func(t *testing.T) {
+		f := New(false, false, false, false)
+		if f.NoColor {
+			t.Error("expected NoColor to be false")
+		}
+	})
+
+	t.Run("NoColor true", func(t *testing.T) {
+		f := New(false, false, false, true)
+		if !f.NoColor {
+			t.Error("expected NoColor to be true")
+		}
+	})
 }

@@ -13,6 +13,7 @@ type Globals struct {
 	Config   string `help:"Path to config file" short:"c" type:"path"`
 	Verbose  bool   `help:"Verbose output" short:"v"`
 	Quiet    bool   `help:"Suppress non-essential output" short:"q"`
+	NoColor  bool   `help:"Disable colored output" name:"no-color" env:"NO_COLOR"`
 }
 
 type CLI struct {
@@ -32,7 +33,7 @@ type Context struct {
 }
 
 func NewContext(globals *Globals) (*Context, error) {
-	formatter := output.New(globals.JSON, globals.Verbose, globals.Quiet)
+	formatter := output.New(globals.JSON, globals.Verbose, globals.Quiet, globals.NoColor)
 
 	var cfg *config.Config
 	var err error

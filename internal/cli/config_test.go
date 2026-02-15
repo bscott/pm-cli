@@ -17,7 +17,7 @@ func TestConfigShowCmdRunWithoutConfig(t *testing.T) {
 	globals := &Globals{}
 	ctx := &Context{
 		Config:    nil,
-		Formatter: output.New(false, false, false),
+		Formatter: output.New(false, false, false, false),
 		Globals:   globals,
 	}
 
@@ -35,7 +35,7 @@ func TestConfigShowCmdRunJSON(t *testing.T) {
 	cfg.Bridge.IMAPPort = 1143
 
 	var buf bytes.Buffer
-	formatter := output.New(true, false, false)
+	formatter := output.New(true, false, false, false)
 	formatter.Writer = &buf
 
 	ctx := &Context{
@@ -86,7 +86,7 @@ func TestConfigSetCmdRunWithInvalidKey(t *testing.T) {
 
 			ctx := &Context{
 				Config:    config.DefaultConfig(),
-				Formatter: output.New(false, false, false),
+				Formatter: output.New(false, false, false, false),
 				Globals:   &Globals{},
 			}
 
@@ -160,7 +160,7 @@ func TestConfigSetCmdRunBridgeKeys(t *testing.T) {
 			cfg := config.DefaultConfig()
 
 			var buf bytes.Buffer
-			formatter := output.New(false, false, true) // Quiet mode
+			formatter := output.New(false, false, true, false) // Quiet mode
 			formatter.Writer = &buf
 
 			ctx := &Context{
@@ -240,7 +240,7 @@ func TestConfigSetCmdRunDefaultsKeys(t *testing.T) {
 			cfg := config.DefaultConfig()
 
 			var buf bytes.Buffer
-			formatter := output.New(false, false, true) // Quiet mode
+			formatter := output.New(false, false, true, false) // Quiet mode
 			formatter.Writer = &buf
 
 			ctx := &Context{
@@ -274,7 +274,7 @@ func TestConfigSetCmdRunInvalidPortValue(t *testing.T) {
 
 	ctx := &Context{
 		Config:    config.DefaultConfig(),
-		Formatter: output.New(false, false, false),
+		Formatter: output.New(false, false, false, false),
 		Globals:   &Globals{},
 	}
 
@@ -292,7 +292,7 @@ func TestConfigSetCmdRunInvalidLimitValue(t *testing.T) {
 
 	ctx := &Context{
 		Config:    config.DefaultConfig(),
-		Formatter: output.New(false, false, false),
+		Formatter: output.New(false, false, false, false),
 		Globals:   &Globals{},
 	}
 
@@ -310,7 +310,7 @@ func TestConfigSetCmdRunInvalidFormatValue(t *testing.T) {
 
 	ctx := &Context{
 		Config:    config.DefaultConfig(),
-		Formatter: output.New(false, false, false),
+		Formatter: output.New(false, false, false, false),
 		Globals:   &Globals{},
 	}
 
@@ -335,7 +335,7 @@ func TestConfigSetCmdCreatesDefaultConfig(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	formatter := output.New(false, false, true) // Quiet mode
+	formatter := output.New(false, false, true, false) // Quiet mode
 	formatter.Writer = &buf
 
 	ctx := &Context{
@@ -363,7 +363,7 @@ func TestConfigValidateCmdRunWithoutConfig(t *testing.T) {
 
 	ctx := &Context{
 		Config:    nil,
-		Formatter: output.New(false, false, false),
+		Formatter: output.New(false, false, false, false),
 		Globals:   &Globals{},
 	}
 
