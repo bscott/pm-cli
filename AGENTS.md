@@ -166,13 +166,76 @@ List all with:
 pm-cli mailbox list --json
 ```
 
+## Semantic Commands
+
+Commands designed specifically for AI/LLM processing:
+
+### Summarize Email
+
+```bash
+pm-cli mail summarize 123 --json
+```
+
+Response:
+```json
+{
+  "id": "123",
+  "from": "sender@example.com",
+  "subject": "Meeting Request",
+  "summary": "Request to schedule a meeting next Tuesday at 2pm",
+  "sentiment": "neutral",
+  "priority": "normal",
+  "action_required": true
+}
+```
+
+### Extract Structured Data
+
+```bash
+pm-cli mail extract 123 --json
+```
+
+Response:
+```json
+{
+  "emails": ["alice@example.com", "bob@example.com"],
+  "urls": ["https://example.com/doc"],
+  "dates": ["2024-01-18", "next Tuesday"],
+  "phone_numbers": ["+1-555-123-4567"],
+  "action_items": ["Review document", "Confirm attendance"]
+}
+```
+
+## Idempotency
+
+Prevent duplicate sends with idempotency keys:
+
+```bash
+pm-cli mail send -t user@example.com -s "Alert" -b "..." --idempotency-key "alert-2024-01-15" --json
+```
+
+Keys are stored locally with 24-hour TTL. Duplicate key returns error without sending.
+
+## RFC3339 Timestamps
+
+JSON output includes `date_iso` field for consistent parsing:
+
+```json
+{
+  "date": "2024-01-15 10:30",
+  "date_iso": "2024-01-15T10:30:00Z"
+}
+```
+
 ## Best Practices
 
 1. **Always use `--json`** for programmatic access
 2. **Check `success` field** in responses
 3. **Handle rate limiting** - add delays between rapid requests
 4. **Use `uid` for persistence** - `seq_num` changes on delete
-5. **Parse dates consistently** - format is `YYYY-MM-DD HH:MM:SS`
+5. **Use `date_iso`** for date parsing (RFC3339 format)
+6. **Use idempotency keys** for send operations to prevent duplicates
+7. **Use semantic commands** for email triage and data extraction
 
 ## Prerequisites
 
@@ -187,29 +250,3 @@ pm-cli mailbox list --json
 ```
 
 If this returns mailboxes, the connection is working.
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds

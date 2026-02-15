@@ -110,12 +110,6 @@ fmt.Println(textOutput)
 - **Bridge not running**: `systemctl --user start protonmail-bridge`
 - **No body content**: Single-part HTML emails need special parsing
 
-## Roadmap
+## Task Tracking
 
-See `1-Projects/pm-cli/pm-cli-roadmap.md` in Obsidian vault for full task list.
-
-Priority items:
-1. Attachment download
-2. Reply/forward workflows
-3. Batch operations
-4. Config doctor command
+Tasks are tracked in `.beads/issues.jsonl` using the BEADS format. Use `bd list` to view open items.
