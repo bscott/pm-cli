@@ -411,7 +411,7 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 	if cfg.Bridge.Email != "" {
 		password, err := cfg.GetPassword()
 		if err == nil {
-			conn, err := net.DialTimeout("tcp", smtpAddr, 5*time.Second)
+			client, err := smtp.Dial(smtpAddr)
 			if err != nil {
 				addResult("SMTP connection succeeds", "fail", err.Error())
 				printResult("fail", "SMTP connection succeeds", err.Error())
@@ -420,12 +420,10 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 					InsecureSkipVerify: true,
 					ServerName:         cfg.Bridge.SMTPHost,
 				}
-				tlsConn := tls.Client(conn, tlsConfig)
-				client, err := smtp.NewClient(tlsConn, cfg.Bridge.SMTPHost)
-				if err != nil {
-					conn.Close()
-					addResult("SMTP connection succeeds", "fail", err.Error())
-					printResult("fail", "SMTP connection succeeds", err.Error())
+				if err := client.StartTLS(tlsConfig); err != nil {
+					client.Close()
+					addResult("SMTP connection succeeds", "fail", fmt.Sprintf("STARTTLS failed: %s", err.Error()))
+					printResult("fail", "SMTP connection succeeds", fmt.Sprintf("STARTTLS failed: %s", err.Error()))
 				} else {
 					auth := smtp.PlainAuth("", cfg.Bridge.Email, password, cfg.Bridge.SMTPHost)
 					if err := client.Auth(auth); err != nil {
