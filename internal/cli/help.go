@@ -134,11 +134,15 @@ func extractMailCommands() CommandSchema {
 					{Name: "id", Type: "string", Required: true, Description: "Message ID or sequence number"},
 				},
 				Flags: []FlagSchema{
+					{Name: "--mailbox", Short: "-m", Type: "string", Description: "Mailbox name (defaults to configured mailbox)"},
 					{Name: "--raw", Type: "bool", Description: "Show raw message"},
 					{Name: "--headers", Type: "bool", Description: "Include all headers"},
+					{Name: "--attachments", Type: "bool", Description: "List attachments only"},
+					{Name: "--html", Type: "bool", Description: "Output HTML body instead of plain text"},
 				},
 				Examples: []string{
 					"pm-cli mail read 123",
+					"pm-cli mail read 123 -m Archive",
 					"pm-cli mail read 123 --json",
 					"pm-cli mail read 123 --raw",
 				},

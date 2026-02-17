@@ -122,6 +122,7 @@ func TestMailListCmdDefaults(t *testing.T) {
 func TestMailReadCmdOptions(t *testing.T) {
 	cmd := MailReadCmd{
 		ID:          "123",
+		Mailbox:     "Archive",
 		Raw:         true,
 		Headers:     true,
 		Attachments: true,
@@ -129,6 +130,9 @@ func TestMailReadCmdOptions(t *testing.T) {
 
 	if cmd.ID != "123" {
 		t.Errorf("ID = %q, want %q", cmd.ID, "123")
+	}
+	if cmd.Mailbox != "Archive" {
+		t.Errorf("Mailbox = %q, want %q", cmd.Mailbox, "Archive")
 	}
 	if !cmd.Raw {
 		t.Error("Raw should be true")

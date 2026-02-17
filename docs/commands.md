@@ -150,6 +150,7 @@ pm-cli mail read <id> [flags]
 **Flags:**
 | Flag | Description |
 |------|-------------|
+| `-m, --mailbox` | Mailbox name (defaults to configured mailbox) |
 | `--raw` | Show raw MIME source |
 | `--headers` | Include all headers |
 | `--attachments` | List attachments only |
@@ -158,6 +159,7 @@ pm-cli mail read <id> [flags]
 **Examples:**
 ```bash
 pm-cli mail read 123
+pm-cli mail read 123 -m Archive
 pm-cli mail read 123 --headers
 pm-cli mail read 123 --raw
 pm-cli mail read 123 --html            # View HTML content
