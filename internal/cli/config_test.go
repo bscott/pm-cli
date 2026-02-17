@@ -382,8 +382,9 @@ func TestConfigDoctorSkipsSMTPAuthWhenSMTPPortUnreachable(t *testing.T) {
 	cfg.Bridge.Email = "test@example.com"
 	cfg.Bridge.IMAPHost = "127.0.0.1"
 	cfg.Bridge.IMAPPort = 1
-	cfg.Bridge.SMTPHost = "127.0.0.1"
-	cfg.Bridge.SMTPPort = 1
+	// ".invalid" is reserved and guaranteed to be non-resolvable.
+	cfg.Bridge.SMTPHost = "smtp.invalid"
+	cfg.Bridge.SMTPPort = 1025
 
 	var buf bytes.Buffer
 	formatter := output.New(true, false, false, false)
