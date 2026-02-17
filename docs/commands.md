@@ -97,6 +97,8 @@ pm-cli config doctor --json
 7. IMAP login succeeds
 8. SMTP connection succeeds
 
+If SMTP port reachability fails in check 6, check 8 is reported as `cannot test - SMTP port not reachable` and SMTP auth is skipped.
+
 ---
 
 ## mail
