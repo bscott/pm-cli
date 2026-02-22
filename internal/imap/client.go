@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +31,7 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("failed to get password: %w", err)
 	}
 
-	addr := fmt.Sprintf("%s:%d", c.config.Bridge.IMAPHost, c.config.Bridge.IMAPPort)
+	addr := net.JoinHostPort(c.config.Bridge.IMAPHost, strconv.Itoa(c.config.Bridge.IMAPPort))
 
 	// TLS config for STARTTLS - skip verification for Proton Bridge self-signed certs
 	options := &imapclient.Options{
@@ -139,9 +141,9 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 
 	// Fetch options
 	fetchOptions := &imap.FetchOptions{
-		UID:         true,
-		Flags:       true,
-		Envelope:    true,
+		UID:          true,
+		Flags:        true,
+		Envelope:     true,
 		InternalDate: true,
 	}
 

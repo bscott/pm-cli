@@ -136,6 +136,8 @@ The SMTP test in `config doctor` may fail due to TLS differences, but actual sen
 pm-cli mail send -t your-other-email@example.com -s "Test" -b "Test message"
 ```
 
+If `SMTP port reachable` fails, `config doctor` now skips SMTP auth and reports `cannot test - SMTP port not reachable` for the SMTP connection check.
+
 ### Reset Configuration
 
 ```bash

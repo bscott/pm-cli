@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
-	"net/smtp"
+	netsmtp "net/smtp"
 	"os"
 	"strconv"
 	"strings"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/bscott/pm-cli/internal/imap"
+	pmsmtp "github.com/bscott/pm-cli/internal/smtp"
 	"golang.org/x/term"
 )
 
@@ -362,7 +363,7 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 	}
 
 	// Check 5: IMAP port is reachable
-	imapAddr := fmt.Sprintf("%s:%d", cfg.Bridge.IMAPHost, cfg.Bridge.IMAPPort)
+	imapAddr := net.JoinHostPort(cfg.Bridge.IMAPHost, strconv.Itoa(cfg.Bridge.IMAPPort))
 	conn, err := net.DialTimeout("tcp", imapAddr, 5*time.Second)
 	if err != nil {
 		addResult("IMAP port reachable", "fail", fmt.Sprintf("cannot connect to %s - is Proton Bridge running?", imapAddr))
@@ -374,13 +375,15 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 	}
 
 	// Check 6: SMTP port is reachable
-	smtpAddr := fmt.Sprintf("%s:%d", cfg.Bridge.SMTPHost, cfg.Bridge.SMTPPort)
-	conn, err = net.DialTimeout("tcp", smtpAddr, 5*time.Second)
+	smtpAddr := net.JoinHostPort(cfg.Bridge.SMTPHost, strconv.Itoa(cfg.Bridge.SMTPPort))
+	smtpReachable := false
+	conn, err = net.DialTimeout("tcp", smtpAddr, pmsmtp.ConnectTimeout)
 	if err != nil {
 		addResult("SMTP port reachable", "fail", fmt.Sprintf("cannot connect to %s - is Proton Bridge running?", smtpAddr))
 		printResult("fail", fmt.Sprintf("SMTP port reachable (%s)", smtpAddr), "is Proton Bridge running?")
 	} else {
 		conn.Close()
+		smtpReachable = true
 		addResult("SMTP port reachable", "ok", smtpAddr)
 		printResult("ok", fmt.Sprintf("SMTP port reachable (%s)", smtpAddr), "")
 	}
@@ -409,38 +412,41 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 
 	// Check 8: SMTP connection succeeds
 	if cfg.Bridge.Email != "" {
-		password, err := cfg.GetPassword()
-		if err == nil {
-			conn, err := net.DialTimeout("tcp", smtpAddr, 5*time.Second)
-			if err != nil {
-				addResult("SMTP connection succeeds", "fail", err.Error())
-				printResult("fail", "SMTP connection succeeds", err.Error())
-			} else {
-				tlsConfig := &tls.Config{
-					InsecureSkipVerify: true,
-					ServerName:         cfg.Bridge.SMTPHost,
-				}
-				tlsConn := tls.Client(conn, tlsConfig)
-				client, err := smtp.NewClient(tlsConn, cfg.Bridge.SMTPHost)
+		if !smtpReachable {
+			addResult("SMTP connection succeeds", "fail", "cannot test - SMTP port not reachable")
+			printResult("fail", "SMTP connection succeeds", "cannot test - SMTP port not reachable")
+		} else {
+			password, err := cfg.GetPassword()
+			if err == nil {
+				client, err := pmsmtp.DialClient(smtpAddr, cfg.Bridge.SMTPHost)
 				if err != nil {
-					conn.Close()
 					addResult("SMTP connection succeeds", "fail", err.Error())
 					printResult("fail", "SMTP connection succeeds", err.Error())
 				} else {
-					auth := smtp.PlainAuth("", cfg.Bridge.Email, password, cfg.Bridge.SMTPHost)
-					if err := client.Auth(auth); err != nil {
-						addResult("SMTP connection succeeds", "fail", err.Error())
-						printResult("fail", "SMTP connection succeeds", err.Error())
-					} else {
-						addResult("SMTP connection succeeds", "ok", "")
-						printResult("ok", "SMTP connection succeeds", "")
+					tlsConfig := &tls.Config{
+						InsecureSkipVerify: true,
+						ServerName:         cfg.Bridge.SMTPHost,
 					}
-					client.Close()
+					if err := client.StartTLS(tlsConfig); err != nil {
+						client.Close()
+						addResult("SMTP connection succeeds", "fail", fmt.Sprintf("STARTTLS failed: %s", err.Error()))
+						printResult("fail", "SMTP connection succeeds", fmt.Sprintf("STARTTLS failed: %s", err.Error()))
+					} else {
+						auth := netsmtp.PlainAuth("", cfg.Bridge.Email, password, cfg.Bridge.SMTPHost)
+						if err := client.Auth(auth); err != nil {
+							addResult("SMTP connection succeeds", "fail", err.Error())
+							printResult("fail", "SMTP connection succeeds", err.Error())
+						} else {
+							addResult("SMTP connection succeeds", "ok", "")
+							printResult("ok", "SMTP connection succeeds", "")
+						}
+						client.Close()
+					}
 				}
+			} else {
+				addResult("SMTP connection succeeds", "fail", "cannot test - password not available")
+				printResult("fail", "SMTP connection succeeds", "cannot test - password not available")
 			}
-		} else {
-			addResult("SMTP connection succeeds", "fail", "cannot test - password not available")
-			printResult("fail", "SMTP connection succeeds", "cannot test - password not available")
 		}
 	} else {
 		addResult("SMTP connection succeeds", "fail", "cannot test - email not configured")

@@ -372,3 +372,61 @@ func TestConfigValidateCmdRunWithoutConfig(t *testing.T) {
 		t.Error("expected error when config is nil")
 	}
 }
+
+func TestConfigDoctorSkipsSMTPAuthWhenSMTPPortUnreachable(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", tmpHome)
+
+	cfg := config.DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	cfg.Bridge.IMAPHost = "127.0.0.1"
+	cfg.Bridge.IMAPPort = 1
+	// ".invalid" is reserved and guaranteed to be non-resolvable.
+	cfg.Bridge.SMTPHost = "smtp.invalid"
+	cfg.Bridge.SMTPPort = 1025
+
+	var buf bytes.Buffer
+	formatter := output.New(true, false, false, false)
+	formatter.Writer = &buf
+
+	cmd := &ConfigDoctorCmd{}
+	ctx := &Context{
+		Config:    cfg,
+		Formatter: formatter,
+		Globals:   &Globals{JSON: true},
+	}
+
+	if err := cmd.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var result struct {
+		Checks []struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v", err)
+	}
+
+	found := false
+	for _, check := range result.Checks {
+		if check.Name != "SMTP connection succeeds" {
+			continue
+		}
+		found = true
+		if check.Status != "fail" {
+			t.Fatalf("status = %q, want %q", check.Status, "fail")
+		}
+		if check.Message != "cannot test - SMTP port not reachable" {
+			t.Fatalf("message = %q, want %q", check.Message, "cannot test - SMTP port not reachable")
+		}
+	}
+
+	if !found {
+		t.Fatal("expected SMTP connection succeeds check in doctor output")
+	}
+}

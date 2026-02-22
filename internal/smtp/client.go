@@ -13,6 +13,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,27 +45,24 @@ func NewClient(cfg *config.Config, password string) *Client {
 }
 
 func (c *Client) Send(msg *Message) error {
-	addr := fmt.Sprintf("%s:%d", c.config.Bridge.SMTPHost, c.config.Bridge.SMTPPort)
+	addr := net.JoinHostPort(c.config.Bridge.SMTPHost, strconv.Itoa(c.config.Bridge.SMTPPort))
 
-	// Connect to SMTP server
-	conn, err := net.Dial("tcp", addr)
+	// Connect to SMTP server using STARTTLS
+	// Proton Bridge SMTP uses STARTTLS (connect plain, then upgrade)
+	client, err := DialClient(addr, c.config.Bridge.SMTPHost)
 	if err != nil {
-		return fmt.Errorf("failed to connect to SMTP server: %w", err)
+		return err
 	}
+	defer client.Close()
 
-	// Wrap with TLS (Proton Bridge uses self-signed cert)
+	// Upgrade to TLS via STARTTLS (Proton Bridge uses self-signed cert)
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 		ServerName:         c.config.Bridge.SMTPHost,
 	}
-	tlsConn := tls.Client(conn, tlsConfig)
-
-	client, err := smtp.NewClient(tlsConn, c.config.Bridge.SMTPHost)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to create SMTP client: %w", err)
+	if err := client.StartTLS(tlsConfig); err != nil {
+		return fmt.Errorf("STARTTLS failed: %w", err)
 	}
-	defer client.Close()
 
 	// Authenticate
 	auth := smtp.PlainAuth("", c.config.Bridge.Email, c.password, c.config.Bridge.SMTPHost)

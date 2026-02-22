@@ -2,10 +2,13 @@ package smtp
 
 import (
 	"bytes"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
 )
@@ -24,6 +27,80 @@ func TestNewClient(t *testing.T) {
 	}
 	if client.password != "testpassword" {
 		t.Error("password not set correctly")
+	}
+}
+
+func TestDialClientUsesConnectTimeout(t *testing.T) {
+	oldDialTimeout := dialTimeout
+	defer func() {
+		dialTimeout = oldDialTimeout
+	}()
+
+	var (
+		gotNetwork string
+		gotAddress string
+		gotTimeout time.Duration
+	)
+	dialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		gotNetwork = network
+		gotAddress = address
+		gotTimeout = timeout
+		return nil, errors.New("dial failed")
+	}
+
+	_, err := DialClient("smtp.example.com:1025", "smtp.example.com")
+	if err == nil {
+		t.Fatal("expected dial error")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to SMTP server") {
+		t.Fatalf("expected wrapped connect error, got %v", err)
+	}
+	if gotNetwork != "tcp" {
+		t.Fatalf("network = %q, want %q", gotNetwork, "tcp")
+	}
+	if gotAddress != "smtp.example.com:1025" {
+		t.Fatalf("address = %q, want %q", gotAddress, "smtp.example.com:1025")
+	}
+	if gotTimeout != ConnectTimeout {
+		t.Fatalf("timeout = %v, want %v", gotTimeout, ConnectTimeout)
+	}
+}
+
+func TestSendUsesTimeoutAwareDial(t *testing.T) {
+	oldDialTimeout := dialTimeout
+	defer func() {
+		dialTimeout = oldDialTimeout
+	}()
+
+	called := false
+	dialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		called = true
+		if timeout != ConnectTimeout {
+			t.Fatalf("timeout = %v, want %v", timeout, ConnectTimeout)
+		}
+		return nil, errors.New("dial failed")
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	cfg.Bridge.SMTPHost = "smtp.example.com"
+	cfg.Bridge.SMTPPort = 1025
+
+	client := NewClient(cfg, "testpassword")
+	err := client.Send(&Message{
+		From:    "test@example.com",
+		To:      []string{"to@example.com"},
+		Subject: "subject",
+		Body:    "body",
+	})
+	if err == nil {
+		t.Fatal("expected send error")
+	}
+	if !called {
+		t.Fatal("expected timeout-aware dial to be called")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to SMTP server") {
+		t.Fatalf("expected connection error, got %v", err)
 	}
 }
 
@@ -308,11 +385,11 @@ func TestEncodeSubjectSpecialCases(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"", ""},                 // Empty string
-		{"ASCII", "ASCII"},       // Pure ASCII
-		{"a", "a"},               // Single char
-		{"123", "123"},           // Numbers only
-		{"!@#$%", "!@#$%"},       // ASCII special chars
+		{"", ""},           // Empty string
+		{"ASCII", "ASCII"}, // Pure ASCII
+		{"a", "a"},         // Single char
+		{"123", "123"},     // Numbers only
+		{"!@#$%", "!@#$%"}, // ASCII special chars
 	}
 
 	for _, tt := range tests {
