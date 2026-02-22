@@ -5,7 +5,7 @@ import (
 	"github.com/bscott/pm-cli/internal/output"
 )
 
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 type Globals struct {
 	JSON     bool   `help:"Output as JSON" name:"json"`
