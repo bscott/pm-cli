@@ -41,6 +41,7 @@ pm-cli mail list --json             # JSON output
 
 ```bash
 pm-cli mail read 123                # Read message #123
+pm-cli mail read 123 -m Archive     # Read from a specific mailbox
 pm-cli mail read 123 --json         # JSON output with body
 pm-cli mail read 123 --headers      # Include all headers
 pm-cli mail read 123 --html         # Output HTML body

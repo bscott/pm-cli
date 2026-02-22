@@ -183,6 +183,7 @@ type MailListCmd struct {
 
 type MailReadCmd struct {
 	ID          string `arg:"" help:"Message ID or sequence number"`
+	Mailbox     string `help:"Mailbox name" short:"m"`
 	Raw         bool   `help:"Show raw message"`
 	Headers     bool   `help:"Include all headers"`
 	Attachments bool   `help:"List attachments"`

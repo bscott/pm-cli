@@ -126,6 +126,11 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
+	mailbox := c.Mailbox
+	if mailbox == "" {
+		mailbox = ctx.Config.Defaults.Mailbox
+	}
+
 	client, err := imap.NewClient(ctx.Config)
 	if err != nil {
 		return err
@@ -138,7 +143,7 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 
 	// Handle --attachments flag: list attachments only
 	if c.Attachments {
-		attachments, err := client.GetAttachments(ctx.Config.Defaults.Mailbox, c.ID)
+		attachments, err := client.GetAttachments(mailbox, c.ID)
 		if err != nil {
 			return err
 		}
@@ -170,7 +175,7 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		return nil
 	}
 
-	msg, err := client.GetMessage(ctx.Config.Defaults.Mailbox, c.ID)
+	msg, err := client.GetMessage(mailbox, c.ID)
 	if err != nil {
 		return err
 	}
