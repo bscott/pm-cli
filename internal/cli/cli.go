@@ -5,7 +5,7 @@ import (
 	"github.com/bscott/pm-cli/internal/output"
 )
 
-var Version = "0.2.0"
+var Version = "0.2.1"
 
 type Globals struct {
 	JSON     bool   `help:"Output as JSON" name:"json"`
@@ -40,11 +40,14 @@ func NewContext(globals *Globals) (*Context, error) {
 
 	if globals.Config != "" {
 		cfg, err = config.Load(globals.Config)
+		if err != nil {
+			return nil, err
+		}
 	} else if config.Exists() {
 		cfg, err = config.Load("")
 	}
 
-	if err != nil && cfg == nil {
+	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 
