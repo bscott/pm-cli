@@ -76,15 +76,10 @@ func TestNewContextWithConfigPath(t *testing.T) {
 		Config: "/nonexistent/config.yaml",
 	}
 
-	ctx, err := NewContext(globals)
-	// Should not error even with invalid config path; falls back to defaults
-	if err != nil {
-		t.Fatalf("NewContext() error = %v", err)
-	}
-
-	// Should have a default config
-	if ctx.Config == nil {
-		t.Error("Config should not be nil (should fall back to defaults)")
+	// Explicit config path that doesn't exist should return an error
+	_, err := NewContext(globals)
+	if err == nil {
+		t.Fatal("NewContext() should error when explicit config path does not exist")
 	}
 }
 
