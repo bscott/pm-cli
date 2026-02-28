@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/bscott/pm-cli/internal/config"
+	"github.com/emersion/go-imap/v2"
 )
 
 func TestNewClient(t *testing.T) {
@@ -163,4 +164,92 @@ func TestClientConfig(t *testing.T) {
 	if client.config.Bridge.Email != "user@protonmail.com" {
 		t.Errorf("Email = %q, want %q", client.config.Bridge.Email, "user@protonmail.com")
 	}
+}
+
+func TestParseMessageSelector(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+		kind    messageSelectorKind
+		seq     uint32
+		uid     imap.UID
+	}{
+		{name: "sequence number", id: "123", kind: selectorKindSeq, seq: 123},
+		{name: "uid selector", id: "uid:456", kind: selectorKindUID, uid: imap.UID(456)},
+		{name: "uid selector uppercase prefix", id: "UID:789", kind: selectorKindUID, uid: imap.UID(789)},
+		{name: "invalid empty", id: "", wantErr: true},
+		{name: "invalid zero sequence", id: "0", wantErr: true},
+		{name: "invalid zero uid", id: "uid:0", wantErr: true},
+		{name: "invalid string", id: "abc", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selector, err := parseMessageSelector(tt.id)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseMessageSelector(%q) expected error", tt.id)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseMessageSelector(%q) error = %v", tt.id, err)
+			}
+			if selector.kind != tt.kind {
+				t.Fatalf("selector.kind = %v, want %v", selector.kind, tt.kind)
+			}
+			if selector.seq != tt.seq {
+				t.Fatalf("selector.seq = %d, want %d", selector.seq, tt.seq)
+			}
+			if selector.uid != tt.uid {
+				t.Fatalf("selector.uid = %d, want %d", selector.uid, tt.uid)
+			}
+		})
+	}
+}
+
+func TestBuildNumSetFromIDs(t *testing.T) {
+	t.Run("sequence set", func(t *testing.T) {
+		numSet, err := buildNumSetFromIDs([]string{"1", "2", "7"})
+		if err != nil {
+			t.Fatalf("buildNumSetFromIDs sequence error = %v", err)
+		}
+		seqSet, ok := numSet.(imap.SeqSet)
+		if !ok {
+			t.Fatalf("expected imap.SeqSet, got %T", numSet)
+		}
+		nums, ok := seqSet.Nums()
+		if !ok {
+			t.Fatal("expected concrete sequence numbers")
+		}
+		if len(nums) != 3 {
+			t.Fatalf("expected 3 sequence numbers, got %d", len(nums))
+		}
+	})
+
+	t.Run("uid set", func(t *testing.T) {
+		numSet, err := buildNumSetFromIDs([]string{"uid:10", "uid:20"})
+		if err != nil {
+			t.Fatalf("buildNumSetFromIDs uid error = %v", err)
+		}
+		uidSet, ok := numSet.(imap.UIDSet)
+		if !ok {
+			t.Fatalf("expected imap.UIDSet, got %T", numSet)
+		}
+		nums, ok := uidSet.Nums()
+		if !ok {
+			t.Fatal("expected concrete UIDs")
+		}
+		if len(nums) != 2 {
+			t.Fatalf("expected 2 uids, got %d", len(nums))
+		}
+	})
+
+	t.Run("mixed ids rejected", func(t *testing.T) {
+		_, err := buildNumSetFromIDs([]string{"1", "uid:2"})
+		if err == nil {
+			t.Fatal("expected error when mixing sequence numbers and UID selectors")
+		}
+	})
 }

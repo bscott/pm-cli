@@ -50,6 +50,7 @@ pm-cli
 │   ├── forward     # Forward message
 │   ├── delete      # Delete messages
 │   ├── move        # Move to folder
+│   ├── archive     # Move to Archive
 │   ├── flag        # Manage flags
 │   ├── search      # Search messages
 │   └── download    # Save attachment

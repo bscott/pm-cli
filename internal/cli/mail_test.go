@@ -259,6 +259,21 @@ func TestMailReadCmdRunWithoutConfig(t *testing.T) {
 	}
 }
 
+func TestMailArchiveCmdRunWithoutConfig(t *testing.T) {
+	cmd := &MailArchiveCmd{
+		IDs: []string{"1"},
+	}
+
+	globals := &Globals{}
+	ctx, _ := NewContext(globals)
+	ctx.Config.Bridge.Email = "" // No email configured
+
+	err := cmd.Run(ctx)
+	if err == nil {
+		t.Error("expected error when email not configured")
+	}
+}
+
 func TestMailSendCmdRunWithoutConfig(t *testing.T) {
 	cmd := &MailSendCmd{
 		To:      []string{"recipient@example.com"},

@@ -66,6 +66,8 @@ Response:
 
 ```bash
 pm-cli mail read 123 --json
+pm-cli mail read uid:456 --json
+pm-cli mail read 123 --unread --json
 ```
 
 Response:
@@ -117,6 +119,7 @@ pm-cli mail flag 123 --star --json
 
 ```bash
 pm-cli mail move 123 Archive --json
+pm-cli mail archive 123 --json
 ```
 
 ### Delete Messages
@@ -145,7 +148,7 @@ Exit codes:
 
 Messages are identified by sequence number (`seq_num`), which is the ID shown in `mail list`. Use this number for `mail read`, `mail delete`, `mail move`, and `mail flag`.
 
-Note: Sequence numbers can change when messages are deleted. For persistent identification, use the `uid` field.
+Note: Sequence numbers can change when messages are deleted. For persistent identification, use the `uid` field and pass IDs as `uid:<uid>` (for example `pm-cli mail read uid:456 --json`).
 
 ## Mailbox Names
 

@@ -19,6 +19,95 @@ type Client struct {
 	config *config.Config
 }
 
+type messageSelector struct {
+	kind messageSelectorKind
+	seq  uint32
+	uid  imap.UID
+}
+
+type messageSelectorKind int
+
+const (
+	selectorKindSeq messageSelectorKind = iota
+	selectorKindUID
+)
+
+func parseMessageSelector(id string) (messageSelector, error) {
+	value := strings.TrimSpace(id)
+	if value == "" {
+		return messageSelector{}, fmt.Errorf("message ID cannot be empty")
+	}
+
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "uid:") {
+		uidValue := strings.TrimSpace(value[4:])
+		parsed, err := strconv.ParseUint(uidValue, 10, 32)
+		if err != nil || parsed == 0 {
+			return messageSelector{}, fmt.Errorf("invalid UID selector: %s (expected uid:<positive-number>)", id)
+		}
+		return messageSelector{
+			kind: selectorKindUID,
+			uid:  imap.UID(parsed),
+		}, nil
+	}
+
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || parsed == 0 {
+		return messageSelector{}, fmt.Errorf("invalid message ID: %s (expected sequence number or uid:<uid>)", id)
+	}
+
+	return messageSelector{
+		kind: selectorKindSeq,
+		seq:  uint32(parsed),
+	}, nil
+}
+
+func selectorToNumSet(selector messageSelector) imap.NumSet {
+	if selector.kind == selectorKindUID {
+		return imap.UIDSetNum(selector.uid)
+	}
+	return imap.SeqSetNum(selector.seq)
+}
+
+func buildNumSetFromIDs(ids []string) (imap.NumSet, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no message IDs provided")
+	}
+
+	firstSelector, err := parseMessageSelector(ids[0])
+	if err != nil {
+		return nil, err
+	}
+
+	if firstSelector.kind == selectorKindUID {
+		set := imap.UIDSetNum(firstSelector.uid)
+		for _, id := range ids[1:] {
+			selector, err := parseMessageSelector(id)
+			if err != nil {
+				return nil, err
+			}
+			if selector.kind != selectorKindUID {
+				return nil, fmt.Errorf("cannot mix sequence numbers and UID selectors in one command")
+			}
+			set.AddNum(selector.uid)
+		}
+		return set, nil
+	}
+
+	set := imap.SeqSetNum(firstSelector.seq)
+	for _, id := range ids[1:] {
+		selector, err := parseMessageSelector(id)
+		if err != nil {
+			return nil, err
+		}
+		if selector.kind != selectorKindSeq {
+			return nil, fmt.Errorf("cannot mix sequence numbers and UID selectors in one command")
+		}
+		set.AddNum(selector.seq)
+	}
+	return set, nil
+}
+
 func NewClient(cfg *config.Config) (*Client, error) {
 	return &Client{
 		config: cfg,
@@ -249,13 +338,12 @@ func (c *Client) GetMessage(mailbox string, id string) (*Message, error) {
 		return nil, fmt.Errorf("mailbox is empty")
 	}
 
-	// Parse the ID as a sequence number
-	var seqNum uint32
-	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-		return nil, fmt.Errorf("invalid message ID: %s", id)
+	selector, err := parseMessageSelector(id)
+	if err != nil {
+		return nil, err
 	}
 
-	seqSet := imap.SeqSetNum(seqNum)
+	numSet := selectorToNumSet(selector)
 
 	fetchOptions := &imap.FetchOptions{
 		UID:          true,
@@ -265,7 +353,7 @@ func (c *Client) GetMessage(mailbox string, id string) (*Message, error) {
 		BodySection:  []*imap.FetchItemBodySection{{}}, // Fetch full body
 	}
 
-	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+	fetchCmd := c.client.Fetch(numSet, fetchOptions)
 	defer fetchCmd.Close()
 
 	msg := fetchCmd.Next()
@@ -330,22 +418,18 @@ func (c *Client) DeleteMessages(mailbox string, ids []string, permanent bool) er
 		return err
 	}
 
-	for _, id := range ids {
-		var seqNum uint32
-		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-			return fmt.Errorf("invalid message ID: %s", id)
-		}
+	numSet, err := buildNumSetFromIDs(ids)
+	if err != nil {
+		return err
+	}
 
-		seqSet := imap.SeqSetNum(seqNum)
-
-		// Add \Deleted flag
-		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
-			Op:    imap.StoreFlagsAdd,
-			Flags: []imap.Flag{imap.FlagDeleted},
-		}, nil)
-		if err := storeCmd.Close(); err != nil {
-			return fmt.Errorf("failed to mark message %s for deletion: %w", id, err)
-		}
+	// Add \Deleted flag
+	storeCmd := c.client.Store(numSet, &imap.StoreFlags{
+		Op:    imap.StoreFlagsAdd,
+		Flags: []imap.Flag{imap.FlagDeleted},
+	}, nil)
+	if err := storeCmd.Close(); err != nil {
+		return fmt.Errorf("failed to mark message(s) for deletion: %w", err)
 	}
 
 	// Expunge if permanent
@@ -371,18 +455,13 @@ func (c *Client) CopyMessages(mailbox string, ids []string, destMailbox string) 
 		return err
 	}
 
-	// Build sequence set from all IDs
-	var seqSet imap.SeqSet
-	for _, id := range ids {
-		var seqNum uint32
-		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-			return fmt.Errorf("invalid message ID: %s", id)
-		}
-		seqSet.AddNum(seqNum)
+	numSet, err := buildNumSetFromIDs(ids)
+	if err != nil {
+		return err
 	}
 
 	// Copy to destination (does not delete from source)
-	copyCmd := c.client.Copy(seqSet, destMailbox)
+	copyCmd := c.client.Copy(numSet, destMailbox)
 	if _, err := copyCmd.Wait(); err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
@@ -396,24 +475,19 @@ func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) 
 		return err
 	}
 
-	// Build sequence set from all IDs
-	var seqSet imap.SeqSet
-	for _, id := range ids {
-		var seqNum uint32
-		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-			return fmt.Errorf("invalid message ID: %s", id)
-		}
-		seqSet.AddNum(seqNum)
+	numSet, err := buildNumSetFromIDs(ids)
+	if err != nil {
+		return err
 	}
 
 	// Copy to destination
-	copyCmd := c.client.Copy(seqSet, destMailbox)
+	copyCmd := c.client.Copy(numSet, destMailbox)
 	if _, err := copyCmd.Wait(); err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
 
 	// Delete from source
-	storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
+	storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 		Op:    imap.StoreFlagsAdd,
 		Flags: []imap.Flag{imap.FlagDeleted},
 	}, nil)
@@ -438,18 +512,13 @@ func (c *Client) SetFlagsMultiple(mailbox string, ids []string, read, unread, st
 		return err
 	}
 
-	// Build sequence set from all IDs
-	var seqSet imap.SeqSet
-	for _, id := range ids {
-		var seqNum uint32
-		if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-			return fmt.Errorf("invalid message ID: %s", id)
-		}
-		seqSet.AddNum(seqNum)
+	numSet, err := buildNumSetFromIDs(ids)
+	if err != nil {
+		return err
 	}
 
 	if read {
-		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
+		storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsAdd,
 			Flags: []imap.Flag{imap.FlagSeen},
 		}, nil)
@@ -459,7 +528,7 @@ func (c *Client) SetFlagsMultiple(mailbox string, ids []string, read, unread, st
 	}
 
 	if unread {
-		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
+		storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsDel,
 			Flags: []imap.Flag{imap.FlagSeen},
 		}, nil)
@@ -469,7 +538,7 @@ func (c *Client) SetFlagsMultiple(mailbox string, ids []string, read, unread, st
 	}
 
 	if star {
-		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
+		storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsAdd,
 			Flags: []imap.Flag{imap.FlagFlagged},
 		}, nil)
@@ -479,7 +548,7 @@ func (c *Client) SetFlagsMultiple(mailbox string, ids []string, read, unread, st
 	}
 
 	if unstar {
-		storeCmd := c.client.Store(seqSet, &imap.StoreFlags{
+		storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 			Op:    imap.StoreFlagsDel,
 			Flags: []imap.Flag{imap.FlagFlagged},
 		}, nil)
@@ -835,19 +904,19 @@ func (c *Client) GetAttachments(mailbox, id string) ([]Attachment, error) {
 		return nil, err
 	}
 
-	var seqNum uint32
-	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-		return nil, fmt.Errorf("invalid message ID: %s", id)
+	selector, err := parseMessageSelector(id)
+	if err != nil {
+		return nil, err
 	}
 
-	seqSet := imap.SeqSetNum(seqNum)
+	numSet := selectorToNumSet(selector)
 
 	// Fetch BODYSTRUCTURE to get attachment info
 	fetchOptions := &imap.FetchOptions{
 		BodyStructure: &imap.FetchItemBodyStructure{},
 	}
 
-	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+	fetchCmd := c.client.Fetch(numSet, fetchOptions)
 	defer fetchCmd.Close()
 
 	msg := fetchCmd.Next()
@@ -940,19 +1009,19 @@ func (c *Client) DownloadAttachment(mailbox, id string, index int) ([]byte, stri
 		return nil, "", err
 	}
 
-	var seqNum uint32
-	if _, err := fmt.Sscanf(id, "%d", &seqNum); err != nil {
-		return nil, "", fmt.Errorf("invalid message ID: %s", id)
+	selector, err := parseMessageSelector(id)
+	if err != nil {
+		return nil, "", err
 	}
 
-	seqSet := imap.SeqSetNum(seqNum)
+	numSet := selectorToNumSet(selector)
 
 	// First get the body structure to find the attachment part
 	fetchOptions := &imap.FetchOptions{
 		BodyStructure: &imap.FetchItemBodyStructure{},
 	}
 
-	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+	fetchCmd := c.client.Fetch(numSet, fetchOptions)
 
 	msg := fetchCmd.Next()
 	if msg == nil {
@@ -991,7 +1060,7 @@ func (c *Client) DownloadAttachment(mailbox, id string, index int) ([]byte, stri
 		BodySection: []*imap.FetchItemBodySection{section},
 	}
 
-	fetchCmd2 := c.client.Fetch(seqSet, fetchOptions2)
+	fetchCmd2 := c.client.Fetch(numSet, fetchOptions2)
 	defer fetchCmd2.Close()
 
 	msg2 := fetchCmd2.Next()

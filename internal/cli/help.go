@@ -16,12 +16,12 @@ type HelpSchema struct {
 }
 
 type CommandSchema struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Flags       []FlagSchema  `json:"flags,omitempty"`
-	Args        []ArgSchema   `json:"args,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Flags       []FlagSchema    `json:"flags,omitempty"`
+	Args        []ArgSchema     `json:"args,omitempty"`
 	Subcommands []CommandSchema `json:"subcommands,omitempty"`
-	Examples    []string      `json:"examples,omitempty"`
+	Examples    []string        `json:"examples,omitempty"`
 }
 
 type FlagSchema struct {
@@ -131,7 +131,7 @@ func extractMailCommands() CommandSchema {
 				Name:        "mail read",
 				Description: "Read a specific message",
 				Args: []ArgSchema{
-					{Name: "id", Type: "string", Required: true, Description: "Message ID or sequence number"},
+					{Name: "id", Type: "string", Required: true, Description: "Message sequence number or uid:<uid>"},
 				},
 				Flags: []FlagSchema{
 					{Name: "--mailbox", Short: "-m", Type: "string", Description: "Mailbox name (defaults to configured mailbox)"},
@@ -139,12 +139,15 @@ func extractMailCommands() CommandSchema {
 					{Name: "--headers", Type: "bool", Description: "Include all headers"},
 					{Name: "--attachments", Type: "bool", Description: "List attachments only"},
 					{Name: "--html", Type: "bool", Description: "Output HTML body instead of plain text"},
+					{Name: "--unread", Type: "bool", Description: "Mark as unread after reading (remove \\Seen)"},
 				},
 				Examples: []string{
 					"pm-cli mail read 123",
+					"pm-cli mail read uid:456 --json",
 					"pm-cli mail read 123 -m Archive",
 					"pm-cli mail read 123 --json",
 					"pm-cli mail read 123 --raw",
+					"pm-cli mail read 123 --unread",
 				},
 			},
 			{
@@ -168,7 +171,7 @@ func extractMailCommands() CommandSchema {
 				Name:        "mail delete",
 				Description: "Delete message(s)",
 				Args: []ArgSchema{
-					{Name: "ids", Type: "[]string", Required: true, Description: "Message ID(s) to delete"},
+					{Name: "ids", Type: "[]string", Required: true, Description: "Message sequence number(s) or uid:<uid>"},
 				},
 				Flags: []FlagSchema{
 					{Name: "--permanent", Type: "bool", Description: "Skip trash, delete permanently"},
@@ -183,19 +186,32 @@ func extractMailCommands() CommandSchema {
 				Name:        "mail move",
 				Description: "Move message to mailbox",
 				Args: []ArgSchema{
-					{Name: "id", Type: "string", Required: true, Description: "Message ID to move"},
+					{Name: "id", Type: "string", Required: true, Description: "Message sequence number or uid:<uid> to move"},
 					{Name: "mailbox", Type: "string", Required: true, Description: "Destination mailbox"},
 				},
 				Examples: []string{
 					"pm-cli mail move 123 Archive",
+					"pm-cli mail move uid:456 Archive",
 					"pm-cli mail move 123 'Custom Folder'",
+				},
+			},
+			{
+				Name:        "mail archive",
+				Description: "Move message(s) to Archive",
+				Args: []ArgSchema{
+					{Name: "ids", Type: "[]string", Required: true, Description: "Message sequence number(s) or uid:<uid>"},
+				},
+				Examples: []string{
+					"pm-cli mail archive 123",
+					"pm-cli mail archive 123 124",
+					"pm-cli mail archive uid:456",
 				},
 			},
 			{
 				Name:        "mail flag",
 				Description: "Manage message flags",
 				Args: []ArgSchema{
-					{Name: "id", Type: "string", Required: true, Description: "Message ID"},
+					{Name: "id", Type: "string", Required: true, Description: "Message sequence number or uid:<uid>"},
 				},
 				Flags: []FlagSchema{
 					{Name: "--read", Type: "bool", Description: "Mark as read"},

@@ -121,6 +121,7 @@ func TestMailReadCmdOptions(t *testing.T) {
 		Raw:         true,
 		Headers:     true,
 		Attachments: true,
+		Unread:      true,
 	}
 
 	if cmd.ID != "123" {
@@ -137,6 +138,9 @@ func TestMailReadCmdOptions(t *testing.T) {
 	}
 	if !cmd.Attachments {
 		t.Error("Attachments should be true")
+	}
+	if !cmd.Unread {
+		t.Error("Unread should be true")
 	}
 }
 
@@ -186,6 +190,20 @@ func TestMailMoveCmdOptions(t *testing.T) {
 	}
 	if cmd.Destination != "Archive" {
 		t.Errorf("Destination = %q, want %q", cmd.Destination, "Archive")
+	}
+}
+
+func TestMailArchiveCmdOptions(t *testing.T) {
+	cmd := MailArchiveCmd{
+		IDs:     []string{"123"},
+		Mailbox: "INBOX",
+	}
+
+	if len(cmd.IDs) != 1 || cmd.IDs[0] != "123" {
+		t.Errorf("IDs = %v, want [123]", cmd.IDs)
+	}
+	if cmd.Mailbox != "INBOX" {
+		t.Errorf("Mailbox = %q, want %q", cmd.Mailbox, "INBOX")
 	}
 }
 
