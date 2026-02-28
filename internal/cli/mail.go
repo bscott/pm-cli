@@ -181,9 +181,11 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 	}
 
 	if c.Unread {
-		if err := client.SetFlags(mailbox, c.ID, false, true, false, false); err != nil {
+		unreadID := fmt.Sprintf("uid:%d", msg.UID)
+		if err := client.SetFlags(mailbox, unreadID, false, true, false, false); err != nil {
 			return fmt.Errorf("failed to mark message as unread after reading: %w", err)
 		}
+		msg.Flags = normalizeFlagsForUnread(msg.Flags)
 	}
 
 	if ctx.Formatter.JSON {
@@ -644,13 +646,17 @@ func (c *MailMoveCmd) Run(ctx *Context) error {
 }
 
 func (c *MailArchiveCmd) Run(ctx *Context) error {
-	moveCmd := MailMoveCmd{
+	moveCmd := c.toMoveCmd()
+	return moveCmd.Run(ctx)
+}
+
+func (c *MailArchiveCmd) toMoveCmd() MailMoveCmd {
+	return MailMoveCmd{
 		IDs:         c.IDs,
 		Destination: "Archive",
 		Query:       c.Query,
 		Mailbox:     c.Mailbox,
 	}
-	return moveCmd.Run(ctx)
 }
 
 func (c *MailFlagCmd) Run(ctx *Context) error {
@@ -2079,6 +2085,17 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeFlagsForUnread(flags []string) []string {
+	normalized := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		if strings.EqualFold(flag, "\\Seen") {
+			continue
+		}
+		normalized = append(normalized, flag)
+	}
+	return normalized
 }
 
 func truncateBody(body string, maxLen int) string {
