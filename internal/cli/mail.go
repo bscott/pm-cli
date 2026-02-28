@@ -180,17 +180,26 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		return err
 	}
 
+	if c.Unread {
+		unreadID := fmt.Sprintf("uid:%d", msg.UID)
+		if err := client.SetFlags(mailbox, unreadID, false, true, false, false); err != nil {
+			return fmt.Errorf("failed to mark message as unread after reading: %w", err)
+		}
+		msg.Flags = normalizeFlagsForUnread(msg.Flags)
+	}
+
 	if ctx.Formatter.JSON {
 		output := map[string]interface{}{
-			"uid":        msg.UID,
-			"seq_num":    msg.SeqNum,
-			"message_id": msg.MessageID,
-			"from":       msg.From,
-			"to":         msg.To,
-			"cc":         msg.CC,
-			"subject":    msg.Subject,
-			"date":       msg.Date,
-			"flags":      msg.Flags,
+			"uid":           msg.UID,
+			"seq_num":       msg.SeqNum,
+			"message_id":    msg.MessageID,
+			"from":          msg.From,
+			"to":            msg.To,
+			"cc":            msg.CC,
+			"subject":       msg.Subject,
+			"date":          msg.Date,
+			"flags":         msg.Flags,
+			"marked_unread": c.Unread,
 		}
 
 		// Parse body
@@ -223,12 +232,14 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 	}
 	fmt.Printf("Date:    %s\n", msg.Date)
 	fmt.Printf("Subject: %s\n", msg.Subject)
+	if msg.MessageID != "" {
+		fmt.Printf("Message-ID: %s\n", msg.MessageID)
+	}
 
 	if c.Headers {
 		fmt.Printf("Flags:   %s\n", strings.Join(msg.Flags, ", "))
-		if msg.MessageID != "" {
-			fmt.Printf("ID:      %s\n", msg.MessageID)
-		}
+		fmt.Printf("UID:     %d\n", msg.UID)
+		fmt.Printf("Seq:     %d\n", msg.SeqNum)
 	}
 
 	fmt.Println()
@@ -265,6 +276,11 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 				fmt.Println("[No body content]")
 			}
 		}
+	}
+
+	if c.Unread {
+		fmt.Println()
+		fmt.Println("[marked as unread]")
 	}
 
 	return nil
@@ -627,6 +643,20 @@ func (c *MailMoveCmd) Run(ctx *Context) error {
 
 	fmt.Printf("%d message(s) moved to %s.\n", len(ids), c.Destination)
 	return nil
+}
+
+func (c *MailArchiveCmd) Run(ctx *Context) error {
+	moveCmd := c.toMoveCmd()
+	return moveCmd.Run(ctx)
+}
+
+func (c *MailArchiveCmd) toMoveCmd() MailMoveCmd {
+	return MailMoveCmd{
+		IDs:         c.IDs,
+		Destination: "Archive",
+		Query:       c.Query,
+		Mailbox:     c.Mailbox,
+	}
 }
 
 func (c *MailFlagCmd) Run(ctx *Context) error {
@@ -1931,21 +1961,21 @@ func (c *MailSummarizeCmd) Run(ctx *Context) error {
 
 	// Build structured summary
 	summary := map[string]interface{}{
-		"id":         msg.SeqNum,
-		"uid":        msg.UID,
-		"message_id": msg.MessageID,
-		"from":       msg.From,
-		"to":         msg.To,
-		"cc":         msg.CC,
-		"subject":    msg.Subject,
-		"date":       msg.Date,
-		"date_iso":   msg.DateISO,
-		"flags":      msg.Flags,
-		"read":       containsString(msg.Flags, "\\Seen"),
-		"flagged":    containsString(msg.Flags, "\\Flagged"),
-		"body_preview": truncateBody(body, 500),
-		"body_length":  len(body),
-		"has_attachments": len(msg.Attachments) > 0,
+		"id":               msg.SeqNum,
+		"uid":              msg.UID,
+		"message_id":       msg.MessageID,
+		"from":             msg.From,
+		"to":               msg.To,
+		"cc":               msg.CC,
+		"subject":          msg.Subject,
+		"date":             msg.Date,
+		"date_iso":         msg.DateISO,
+		"flags":            msg.Flags,
+		"read":             containsString(msg.Flags, "\\Seen"),
+		"flagged":          containsString(msg.Flags, "\\Flagged"),
+		"body_preview":     truncateBody(body, 500),
+		"body_length":      len(body),
+		"has_attachments":  len(msg.Attachments) > 0,
 		"attachment_count": len(msg.Attachments),
 	}
 
@@ -2057,6 +2087,17 @@ func containsString(slice []string, s string) bool {
 	return false
 }
 
+func normalizeFlagsForUnread(flags []string) []string {
+	normalized := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		if strings.EqualFold(flag, "\\Seen") {
+			continue
+		}
+		normalized = append(normalized, flag)
+	}
+	return normalized
+}
+
 func truncateBody(body string, maxLen int) string {
 	if len(body) <= maxLen {
 		return strings.TrimSpace(body)
@@ -2085,12 +2126,12 @@ func extractURLs(text string) []string {
 func extractDates(text string) []string {
 	// Match common date formats
 	patterns := []string{
-		`\d{4}-\d{2}-\d{2}`,                           // 2024-01-15
-		`\d{1,2}/\d{1,2}/\d{2,4}`,                     // 1/15/24 or 01/15/2024
+		`\d{4}-\d{2}-\d{2}`,       // 2024-01-15
+		`\d{1,2}/\d{1,2}/\d{2,4}`, // 1/15/24 or 01/15/2024
 		`(?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4}`, // January 15, 2024
 		`\d{1,2} (?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4}`,   // 15 January 2024
 	}
-	
+
 	var dates []string
 	for _, pattern := range patterns {
 		re := regexp.MustCompile(pattern)
@@ -2110,7 +2151,7 @@ func extractPhones(text string) []string {
 func extractActionItems(text string) []string {
 	var items []string
 	lines := strings.Split(text, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// Lines starting with -, *, •, or numbered (1., 2., etc.)

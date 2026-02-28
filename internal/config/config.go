@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	AppName       = "pm-cli"
-	KeyringUser   = "bridge-password"
-	DefaultIMAP   = "127.0.0.1"
+	AppName         = "pm-cli"
+	KeyringUser     = "bridge-password"
+	DefaultIMAP     = "127.0.0.1"
 	DefaultIMAPPort = 1143
-	DefaultSMTP   = "127.0.0.1"
+	DefaultSMTP     = "127.0.0.1"
 	DefaultSMTPPort = 1025
 )
 

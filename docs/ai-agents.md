@@ -13,6 +13,8 @@ pm-cli mailbox list --json
 pm-cli config doctor --json
 ```
 
+Message selectors accept either sequence numbers (`123`) or stable UID selectors (`uid:456`) across read/delete/move/flag/download/thread operations.
+
 ## Command Schema
 
 Get the full command schema as JSON:
@@ -76,6 +78,12 @@ Output:
   "count": 1
 }
 ```
+
+### Stable ID Guidance
+
+- `seq_num` is mailbox-local and can change after deletes/expunges.
+- `uid` is stable within a mailbox and preferred for persistent workflows.
+- Use `uid:<uid>` in command arguments when you need stability.
 
 ### Send Email
 

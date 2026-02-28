@@ -5,7 +5,7 @@ import (
 	"github.com/bscott/pm-cli/internal/output"
 )
 
-var Version = "0.2.1"
+var Version = "0.2.2"
 
 type Globals struct {
 	JSON     bool   `help:"Output as JSON" name:"json"`
@@ -82,31 +82,32 @@ type ConfigDoctorCmd struct{}
 
 // MailCmd handles email operations
 type MailCmd struct {
-	List     MailListCmd     `cmd:"" help:"List messages in mailbox"`
-	Read     MailReadCmd     `cmd:"" help:"Read a specific message"`
-	Send     MailSendCmd     `cmd:"" help:"Compose and send email"`
-	Reply    MailReplyCmd    `cmd:"" help:"Reply to a message"`
-	Forward  MailForwardCmd  `cmd:"" help:"Forward a message"`
-	Delete   MailDeleteCmd   `cmd:"" help:"Delete message(s)"`
-	Move     MailMoveCmd     `cmd:"" help:"Move message to mailbox"`
-	Flag     MailFlagCmd     `cmd:"" help:"Manage message flags"`
-	Search   MailSearchCmd   `cmd:"" help:"Search messages"`
-	Download MailDownloadCmd `cmd:"" help:"Download attachment"`
-	Draft    DraftCmd        `cmd:"" help:"Manage drafts"`
-	Thread   MailThreadCmd   `cmd:"" help:"Show conversation thread"`
-	Watch    MailWatchCmd    `cmd:"" help:"Watch for new messages"`
-	Label    LabelCmd        `cmd:"" help:"Manage message labels"`
+	List      MailListCmd      `cmd:"" help:"List messages in mailbox"`
+	Read      MailReadCmd      `cmd:"" help:"Read a specific message"`
+	Send      MailSendCmd      `cmd:"" help:"Compose and send email"`
+	Reply     MailReplyCmd     `cmd:"" help:"Reply to a message"`
+	Forward   MailForwardCmd   `cmd:"" help:"Forward a message"`
+	Delete    MailDeleteCmd    `cmd:"" help:"Delete message(s)"`
+	Move      MailMoveCmd      `cmd:"" help:"Move message to mailbox"`
+	Archive   MailArchiveCmd   `cmd:"" help:"Move message(s) to Archive"`
+	Flag      MailFlagCmd      `cmd:"" help:"Manage message flags"`
+	Search    MailSearchCmd    `cmd:"" help:"Search messages"`
+	Download  MailDownloadCmd  `cmd:"" help:"Download attachment"`
+	Draft     DraftCmd         `cmd:"" help:"Manage drafts"`
+	Thread    MailThreadCmd    `cmd:"" help:"Show conversation thread"`
+	Watch     MailWatchCmd     `cmd:"" help:"Watch for new messages"`
+	Label     LabelCmd         `cmd:"" help:"Manage message labels"`
 	Summarize MailSummarizeCmd `cmd:"" help:"Summarize message for AI processing"`
 	Extract   MailExtractCmd   `cmd:"" help:"Extract structured data from message"`
 }
 
 type MailSummarizeCmd struct {
-	ID      string `arg:"" help:"Message ID to summarize"`
+	ID      string `arg:"" help:"Message sequence number or uid:<uid> to summarize"`
 	Mailbox string `help:"Mailbox name" short:"m" default:"INBOX"`
 }
 
 type MailExtractCmd struct {
-	ID      string `arg:"" help:"Message ID to extract data from"`
+	ID      string `arg:"" help:"Message sequence number or uid:<uid> to extract data from"`
 	Mailbox string `help:"Mailbox name" short:"m" default:"INBOX"`
 }
 
@@ -139,7 +140,7 @@ type MailWatchCmd struct {
 }
 
 type MailThreadCmd struct {
-	ID      string `arg:"" help:"Message ID to show thread for"`
+	ID      string `arg:"" help:"Message sequence number or uid:<uid> to show thread for"`
 	Mailbox string `help:"Mailbox to search" short:"m" default:"INBOX"`
 }
 
@@ -185,12 +186,13 @@ type MailListCmd struct {
 }
 
 type MailReadCmd struct {
-	ID          string `arg:"" help:"Message ID or sequence number"`
+	ID          string `arg:"" help:"Message sequence number or uid:<uid>"`
 	Mailbox     string `help:"Mailbox name" short:"m"`
 	Raw         bool   `help:"Show raw message"`
 	Headers     bool   `help:"Include all headers"`
 	Attachments bool   `help:"List attachments"`
 	HTML        bool   `help:"Output HTML body instead of plain text"`
+	Unread      bool   `help:"Mark as unread after reading (remove \\\\Seen)" name:"unread"`
 }
 
 type MailSendCmd struct {
@@ -206,7 +208,7 @@ type MailSendCmd struct {
 }
 
 type MailReplyCmd struct {
-	ID             string   `arg:"" help:"Message ID to reply to"`
+	ID             string   `arg:"" help:"Message sequence number or uid:<uid> to reply to"`
 	All            bool     `help:"Reply to all recipients" name:"all"`
 	Body           string   `help:"Reply body" short:"b"`
 	Attach         []string `help:"Attachments" short:"a" type:"existingfile"`
@@ -214,7 +216,7 @@ type MailReplyCmd struct {
 }
 
 type MailForwardCmd struct {
-	ID             string   `arg:"" help:"Message ID to forward"`
+	ID             string   `arg:"" help:"Message sequence number or uid:<uid> to forward"`
 	To             []string `help:"Recipient(s)" short:"t" required:""`
 	Body           string   `help:"Additional message" short:"b"`
 	Attach         []string `help:"Additional attachments" short:"a" type:"existingfile"`
@@ -222,27 +224,33 @@ type MailForwardCmd struct {
 }
 
 type MailDeleteCmd struct {
-	IDs       []string `arg:"" optional:"" help:"Message ID(s) to delete"`
+	IDs       []string `arg:"" optional:"" help:"Message sequence number(s) or uid:<uid> to delete"`
 	Query     string   `help:"Delete messages matching search query (e.g., 'from:spam@example.com')"`
 	Mailbox   string   `help:"Mailbox to operate on" short:"m" default:"INBOX"`
 	Permanent bool     `help:"Skip trash, delete permanently"`
 }
 
 type MailDownloadCmd struct {
-	ID    string `arg:"" help:"Message ID"`
+	ID    string `arg:"" help:"Message sequence number or uid:<uid>"`
 	Index int    `arg:"" help:"Attachment index (0-based)"`
 	Out   string `help:"Output path (default: original filename)" short:"o"`
 }
 
 type MailMoveCmd struct {
-	IDs         []string `arg:"" optional:"" help:"Message ID(s) to move"`
+	IDs         []string `arg:"" optional:"" help:"Message sequence number(s) or uid:<uid> to move"`
 	Destination string   `help:"Destination mailbox" short:"d" required:""`
 	Query       string   `help:"Move messages matching search query (e.g., 'subject:newsletter')"`
 	Mailbox     string   `help:"Source mailbox" short:"m" default:"INBOX"`
 }
 
+type MailArchiveCmd struct {
+	IDs     []string `arg:"" optional:"" help:"Message sequence number(s) or uid:<uid> to archive"`
+	Query   string   `help:"Archive messages matching search query (e.g., 'subject:newsletter')"`
+	Mailbox string   `help:"Source mailbox" short:"m" default:"INBOX"`
+}
+
 type MailFlagCmd struct {
-	IDs     []string `arg:"" optional:"" help:"Message ID(s)"`
+	IDs     []string `arg:"" optional:"" help:"Message sequence number(s) or uid:<uid>"`
 	Query   string   `help:"Flag messages matching search query (e.g., 'from:user@example.com')"`
 	Mailbox string   `help:"Mailbox to operate on" short:"m" default:"INBOX"`
 	Read    bool     `help:"Mark as read" xor:"read"`

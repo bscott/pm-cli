@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -256,6 +257,82 @@ func TestMailReadCmdRunWithoutConfig(t *testing.T) {
 	err := cmd.Run(ctx)
 	if err == nil {
 		t.Error("expected error when email not configured")
+	}
+}
+
+func TestMailArchiveCmdRunWithoutConfig(t *testing.T) {
+	cmd := &MailArchiveCmd{
+		IDs: []string{"1"},
+	}
+
+	globals := &Globals{}
+	ctx, _ := NewContext(globals)
+	ctx.Config.Bridge.Email = "" // No email configured
+
+	err := cmd.Run(ctx)
+	if err == nil {
+		t.Error("expected error when email not configured")
+	}
+}
+
+func TestNormalizeFlagsForUnread(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "removes seen flag",
+			input:    []string{"\\Seen", "\\Flagged"},
+			expected: []string{"\\Flagged"},
+		},
+		{
+			name:     "removes seen flag case insensitive",
+			input:    []string{"\\seen", "\\Answered"},
+			expected: []string{"\\Answered"},
+		},
+		{
+			name:     "keeps non seen flags",
+			input:    []string{"\\Flagged", "\\Answered"},
+			expected: []string{"\\Flagged", "\\Answered"},
+		},
+		{
+			name:     "empty input",
+			input:    []string{},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeFlagsForUnread(tt.input)
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Fatalf("normalizeFlagsForUnread(%v) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMailArchiveCmdToMoveCmd(t *testing.T) {
+	cmd := &MailArchiveCmd{
+		IDs:     []string{"1", "uid:42"},
+		Query:   "subject:\"invoice\"",
+		Mailbox: "INBOX",
+	}
+
+	moveCmd := cmd.toMoveCmd()
+
+	if moveCmd.Destination != "Archive" {
+		t.Fatalf("destination = %q, want %q", moveCmd.Destination, "Archive")
+	}
+	if !reflect.DeepEqual(moveCmd.IDs, cmd.IDs) {
+		t.Fatalf("IDs = %v, want %v", moveCmd.IDs, cmd.IDs)
+	}
+	if moveCmd.Query != cmd.Query {
+		t.Fatalf("query = %q, want %q", moveCmd.Query, cmd.Query)
+	}
+	if moveCmd.Mailbox != cmd.Mailbox {
+		t.Fatalf("mailbox = %q, want %q", moveCmd.Mailbox, cmd.Mailbox)
 	}
 }
 

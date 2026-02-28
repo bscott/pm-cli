@@ -41,9 +41,11 @@ pm-cli mail list --json             # JSON output
 
 ```bash
 pm-cli mail read 123                # Read message #123
+pm-cli mail read uid:456            # Read by stable UID
 pm-cli mail read 123 -m Archive     # Read from a specific mailbox
 pm-cli mail read 123 --json         # JSON output with body
 pm-cli mail read 123 --headers      # Include all headers
+pm-cli mail read 123 --unread       # Mark unread after reading
 pm-cli mail read 123 --html         # Output HTML body
 pm-cli mail read 123 --attachments  # List attachments
 pm-cli mail read 123 --raw          # Raw MIME source
@@ -106,11 +108,23 @@ pm-cli mail delete 123 456 789      # Batch delete
 pm-cli mail delete --query "from:spam@example.com"  # Delete by search
 pm-cli mail delete 123 --permanent  # Delete permanently
 pm-cli mail move 123 Archive        # Move to folder
+pm-cli mail archive 123             # Shortcut: move to Archive
 pm-cli mail move 123 456 -d Archive # Batch move
 pm-cli mail flag 123 --read         # Mark as read
 pm-cli mail flag 123 --star         # Add star
 pm-cli mail flag 123 456 --unread   # Batch flag
 ```
+
+### Message IDs
+
+Use sequence numbers by default (the `ID` shown in `mail list`), or use explicit UID selectors for stable references:
+
+```bash
+pm-cli mail read 123        # sequence number (can change over time)
+pm-cli mail read uid:456    # UID selector (stable within mailbox)
+```
+
+JSON outputs include both `seq_num` and `uid`. `mail read` JSON and header output include `message_id` (RFC 5322 Message-ID header) when available.
 
 ### Labels
 

@@ -149,6 +149,8 @@ Read a specific message.
 pm-cli mail read <id> [flags]
 ```
 
+`<id>` accepts either a sequence number (for example `123`) or `uid:<uid>` (for example `uid:456`).
+
 **Flags:**
 | Flag | Description |
 |------|-------------|
@@ -157,15 +159,18 @@ pm-cli mail read <id> [flags]
 | `--headers` | Include all headers |
 | `--attachments` | List attachments only |
 | `--html` | Output HTML body instead of plain text |
+| `--unread` | Mark as unread after reading (remove `\Seen`) |
 
 **Examples:**
 ```bash
 pm-cli mail read 123
+pm-cli mail read uid:456
 pm-cli mail read 123 -m Archive
 pm-cli mail read 123 --headers
 pm-cli mail read 123 --raw
 pm-cli mail read 123 --html            # View HTML content
 pm-cli mail read 123 --attachments
+pm-cli mail read 123 --unread          # Read but keep unread
 pm-cli mail read 123 --json
 ```
 
@@ -292,6 +297,8 @@ Delete messages.
 pm-cli mail delete <id>... [flags]
 ```
 
+`<id>` accepts sequence numbers or `uid:<uid>`.
+
 **Flags:**
 | Flag | Description |
 |------|-------------|
@@ -312,10 +319,26 @@ Move a message to another mailbox.
 pm-cli mail move <id> <mailbox>
 ```
 
+`<id>` accepts sequence numbers or `uid:<uid>`.
+
 **Examples:**
 ```bash
 pm-cli mail move 123 Archive
+pm-cli mail move uid:456 Archive
 pm-cli mail move 123 "Projects/Active"
+```
+
+To archive quickly:
+
+```bash
+pm-cli mail archive <id>...
+```
+
+Examples:
+
+```bash
+pm-cli mail archive 123
+pm-cli mail archive uid:456
 ```
 
 ### mail flag
@@ -325,6 +348,8 @@ Manage message flags.
 ```bash
 pm-cli mail flag <id> [flags]
 ```
+
+`<id>` accepts sequence numbers or `uid:<uid>`.
 
 **Flags:**
 | Flag | Description |
