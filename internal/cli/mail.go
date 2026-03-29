@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"os/signal"
 	"regexp"
 	"strings"
@@ -1353,11 +1354,11 @@ func (c *MailDownloadCmd) Run(ctx *Context) error {
 
 	attachment := attachments[c.Index]
 
-	// Determine output path
+	// Determine output path — sanitize MIME filename to prevent path traversal (CWE-22)
 	outPath := c.Out
 	if outPath == "" {
-		outPath = attachment.Filename
-		if outPath == "" {
+		outPath = filepath.Base(attachment.Filename)
+		if outPath == "" || outPath == "." {
 			outPath = fmt.Sprintf("attachment_%d", c.Index)
 		}
 	}
