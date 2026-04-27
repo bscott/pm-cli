@@ -532,12 +532,20 @@ pm-cli mail watch --json
 
 # Notify and read the new message
 pm-cli mail watch -e "pm-cli mail read {}"
+
+# Use environment variables instead of {} substitution
+pm-cli mail watch -e 'echo "From: $PM_MSG_FROM | Subject: $PM_MSG_SUBJECT" | logger'
 ```
 
 The watch command:
 - Polls the mailbox at regular intervals
 - Tracks message UIDs to detect new arrivals
 - Optionally executes a command with the message ID substituted for `{}`
+- Exposes message metadata as environment variables to the executed command:
+  `PM_MSG_SEQ`, `PM_MSG_UID` (numeric), `PM_MSG_FROM`, `PM_MSG_SUBJECT`
+  (sanitized for CR/LF). Prefer these over `{}` for non-numeric data —
+  the exec template is passed to `sh -c`, so any string-substituted token
+  carrying email-derived content would be a shell-injection sink.
 - Handles Ctrl+C gracefully for clean shutdown
 - Supports JSON output for integration with scripts and AI agents
 

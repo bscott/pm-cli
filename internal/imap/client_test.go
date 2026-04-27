@@ -1,11 +1,78 @@
 package imap
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/emersion/go-imap/v2"
 )
+
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"  127.0.0.1  ", true},
+		{"imap.example.com", false},
+		{"10.0.0.1", false},
+		{"", false},
+		{"localhost.evil.com", false},
+	}
+	for _, tc := range tests {
+		got := isLoopbackHost(tc.host)
+		if got != tc.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestConnectRejectsNonLoopbackHost(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	cfg.Bridge.IMAPHost = "imap.example.com"
+	cfg.Bridge.IMAPPort = 993
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	err = client.Connect()
+	if err == nil {
+		t.Fatal("expected loopback rejection")
+	}
+	if !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected loopback error, got %v", err)
+	}
+}
+
+func TestBuildDraftMessageStripsHeaderInjection(t *testing.T) {
+	draft := &Draft{
+		To:      []string{"victim@example.com\r\nBcc: attacker@evil.example"},
+		CC:      []string{"normal@example.com\r\nX-Evil: 1"},
+		Subject: "Hi\r\nBcc: attacker2@evil.example",
+		Body:    "body",
+	}
+	out := buildDraftMessage(draft, "sender@example.com\r\nX-Spoof: yes")
+	injectedHeaders := []string{
+		"\r\nBcc:",
+		"\r\nX-Evil:",
+		"\r\nX-Spoof:",
+		"\nBcc:",
+		"\nX-Evil:",
+		"\nX-Spoof:",
+	}
+	for _, h := range injectedHeaders {
+		if strings.Contains(out, h) {
+			t.Errorf("injected header line %q reached draft output:\n%s", h, out)
+		}
+	}
+}
 
 func TestNewClient(t *testing.T) {
 	cfg := config.DefaultConfig()

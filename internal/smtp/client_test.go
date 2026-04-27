@@ -83,7 +83,7 @@ func TestSendUsesTimeoutAwareDial(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Bridge.Email = "test@example.com"
-	cfg.Bridge.SMTPHost = "smtp.example.com"
+	cfg.Bridge.SMTPHost = "127.0.0.1"
 	cfg.Bridge.SMTPPort = 1025
 
 	client := NewClient(cfg, "testpassword")
@@ -101,6 +101,53 @@ func TestSendUsesTimeoutAwareDial(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to connect to SMTP server") {
 		t.Fatalf("expected connection error, got %v", err)
+	}
+}
+
+func TestSendRejectsNonLoopbackHost(t *testing.T) {
+	// Sanity check: Send must refuse to transmit credentials when the
+	// configured SMTP host is not a loopback address. InsecureSkipVerify is
+	// only safe under the Proton Bridge-on-localhost trust assumption.
+	cfg := config.DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	cfg.Bridge.SMTPHost = "smtp.example.com"
+	cfg.Bridge.SMTPPort = 1025
+
+	client := NewClient(cfg, "testpassword")
+	err := client.Send(&Message{
+		From: "test@example.com",
+		To:   []string{"to@example.com"},
+	})
+	if err == nil {
+		t.Fatal("expected error rejecting non-loopback host")
+	}
+	if !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected loopback rejection, got %v", err)
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{"127.0.0.1", true},
+		{"127.1.2.3", true},
+		{"::1", true},
+		{"  127.0.0.1  ", true},
+		{"smtp.example.com", false},
+		{"10.0.0.1", false},
+		{"0.0.0.0", false},
+		{"", false},
+		{"localhost.evil.com", false},
+	}
+	for _, tc := range tests {
+		got := isLoopbackHost(tc.host)
+		if got != tc.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", tc.host, got, tc.want)
+		}
 	}
 }
 
@@ -396,6 +443,52 @@ func TestEncodeSubjectSpecialCases(t *testing.T) {
 		result := encodeSubject(tt.input)
 		if result != tt.expected {
 			t.Errorf("encodeSubject(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// TestWriteMessageStripsHeaderInjection verifies that attacker-controlled
+// CR/LF sequences in Subject, In-Reply-To, References, and recipient lists
+// are stripped before being written to the SMTP DATA stream. Without this,
+// a Message-ID like "<x>\r\nBcc: attacker@evil.example" copied into
+// In-Reply-To on reply would silently CC an attacker.
+func TestWriteMessageStripsHeaderInjection(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	cfg.Bridge.SMTPHost = "127.0.0.1"
+	c := NewClient(cfg, "pw")
+
+	msg := &Message{
+		From:       "sender@example.com",
+		To:         []string{"victim@example.com\r\nBcc: attacker@evil.example"},
+		CC:         []string{"normal@example.com\r\nX-Evil: 1"},
+		Subject:    "Hello\r\nBcc: attacker2@evil.example",
+		Body:       "body",
+		InReplyTo:  "<id@x>\r\nBcc: attacker3@evil.example",
+		References: "<id@x>\r\nX-Spoof: yes",
+	}
+
+	var buf bytes.Buffer
+	if err := c.writeMessage(&buf, msg); err != nil {
+		t.Fatalf("writeMessage: %v", err)
+	}
+
+	out := buf.String()
+	// The sanitizer strips CR/LF, so the injected text remains in the value
+	// (now garbled into one line) — what must NOT happen is the injected
+	// content appearing at the start of a new header line.
+	injectedHeaders := []string{
+		"\r\nBcc:",
+		"\r\nX-Evil:",
+		"\r\nX-Spoof:",
+		// Bare LF should not appear either (we strip both LF and CR).
+		"\nBcc:",
+		"\nX-Evil:",
+		"\nX-Spoof:",
+	}
+	for _, h := range injectedHeaders {
+		if strings.Contains(out, h) {
+			t.Errorf("injected header line %q reached output:\n%s", h, out)
 		}
 	}
 }

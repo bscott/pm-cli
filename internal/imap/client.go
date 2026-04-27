@@ -10,9 +10,28 @@ import (
 	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
+	"github.com/bscott/pm-cli/internal/safetext"
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 )
+
+// isLoopbackHost reports whether host is a loopback address. Accepts the
+// literal "localhost" (case-insensitive) or any IP that parses as loopback.
+// Does not resolve DNS; DNS is itself untrusted and we want a hard
+// guarantee that we are speaking to a local process (Proton Bridge).
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return false
+	}
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 type Client struct {
 	client *imapclient.Client
@@ -115,6 +134,14 @@ func NewClient(cfg *config.Config) (*Client, error) {
 }
 
 func (c *Client) Connect() error {
+	// TLS skip-verify below is only safe against a locally-running Proton
+	// Bridge. Refuse to send the Bridge password to anything that is not a
+	// loopback address, in case the user's config was tampered with or
+	// redirected via --config.
+	if !isLoopbackHost(c.config.Bridge.IMAPHost) {
+		return fmt.Errorf("refusing to connect: IMAP host %q is not a loopback address (Proton Bridge runs on localhost; InsecureSkipVerify is unsafe for remote hosts)", c.config.Bridge.IMAPHost)
+	}
+
 	password, err := c.config.GetPassword()
 	if err != nil {
 		return fmt.Errorf("failed to get password: %w", err)
@@ -1329,23 +1356,34 @@ func (c *Client) DeleteDraft(ids []string) error {
 	return c.DeleteMessages("Drafts", ids, true)
 }
 
+// sanitizeAddressList strips CR/LF from each address and joins with ", ".
+func sanitizeAddressList(addrs []string) string {
+	clean := make([]string, len(addrs))
+	for i, a := range addrs {
+		clean[i] = safetext.SanitizeHeaderValue(a)
+	}
+	return strings.Join(clean, ", ")
+}
+
 // buildDraftMessage creates an RFC822 message from a Draft
 func buildDraftMessage(draft *Draft, from string) string {
 	var sb strings.Builder
 
-	// Headers
-	sb.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	// Headers — strip CR/LF from every value to prevent header injection
+	// if draft data was ever sourced from untrusted input (e.g. a forward
+	// template pulling Subject/From from a received email).
+	sb.WriteString(fmt.Sprintf("From: %s\r\n", safetext.SanitizeHeaderValue(from)))
 
 	if len(draft.To) > 0 {
-		sb.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(draft.To, ", ")))
+		sb.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeAddressList(draft.To)))
 	}
 
 	if len(draft.CC) > 0 {
-		sb.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(draft.CC, ", ")))
+		sb.WriteString(fmt.Sprintf("Cc: %s\r\n", sanitizeAddressList(draft.CC)))
 	}
 
 	if draft.Subject != "" {
-		sb.WriteString(fmt.Sprintf("Subject: %s\r\n", draft.Subject))
+		sb.WriteString(fmt.Sprintf("Subject: %s\r\n", safetext.SanitizeHeaderValue(draft.Subject)))
 	}
 
 	sb.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))

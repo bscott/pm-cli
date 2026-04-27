@@ -18,7 +18,26 @@ import (
 	"time"
 
 	"github.com/bscott/pm-cli/internal/config"
+	"github.com/bscott/pm-cli/internal/safetext"
 )
+
+// isLoopbackHost reports whether host is a loopback address. Accepts the
+// literal "localhost" (case-insensitive) or any IP that parses as loopback.
+// Does not resolve DNS, because DNS is itself untrusted and we want a hard
+// guarantee that we are speaking to a local process (Proton Bridge).
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return false
+	}
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 type Client struct {
 	config   *config.Config
@@ -45,6 +64,14 @@ func NewClient(cfg *config.Config, password string) *Client {
 }
 
 func (c *Client) Send(msg *Message) error {
+	// TLS skip-verify below is only safe against a locally-running Proton
+	// Bridge. Refuse to speak plaintext credentials to anything that is not
+	// a loopback address, in case the user's config was tampered with or
+	// redirected via --config.
+	if !isLoopbackHost(c.config.Bridge.SMTPHost) {
+		return fmt.Errorf("refusing to connect: SMTP host %q is not a loopback address (Proton Bridge runs on localhost; InsecureSkipVerify is unsafe for remote hosts)", c.config.Bridge.SMTPHost)
+	}
+
 	addr := net.JoinHostPort(c.config.Bridge.SMTPHost, strconv.Itoa(c.config.Bridge.SMTPPort))
 
 	// Connect to SMTP server using STARTTLS
@@ -70,7 +97,11 @@ func (c *Client) Send(msg *Message) error {
 		return fmt.Errorf("SMTP authentication failed: %w", err)
 	}
 
-	// Set sender
+	// Set sender. Reject CR/LF in envelope addresses — net/smtp writes these
+	// raw into MAIL FROM / RCPT TO lines.
+	if strings.ContainsAny(msg.From, "\r\n") {
+		return fmt.Errorf("invalid sender address: contains CR/LF")
+	}
 	if err := client.Mail(msg.From); err != nil {
 		return fmt.Errorf("failed to set sender: %w", err)
 	}
@@ -82,6 +113,9 @@ func (c *Client) Send(msg *Message) error {
 	allRecipients = append(allRecipients, msg.BCC...)
 
 	for _, rcpt := range allRecipients {
+		if strings.ContainsAny(rcpt, "\r\n") {
+			return fmt.Errorf("invalid recipient address: contains CR/LF")
+		}
 		if err := client.Rcpt(rcpt); err != nil {
 			return fmt.Errorf("failed to add recipient %s: %w", rcpt, err)
 		}
@@ -108,19 +142,22 @@ func (c *Client) Send(msg *Message) error {
 func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 	hasAttachments := len(msg.Attachments) > 0
 
-	// Headers
-	fmt.Fprintf(w, "From: %s\r\n", msg.From)
-	fmt.Fprintf(w, "To: %s\r\n", strings.Join(msg.To, ", "))
+	// Headers — sanitize every value for CR/LF. Subject/InReplyTo/References
+	// can carry attacker-controlled data (e.g., the Message-ID of a received
+	// email copied into In-Reply-To on reply); without sanitization an
+	// attacker can inject additional headers or body content.
+	fmt.Fprintf(w, "From: %s\r\n", sanitizeAddressList([]string{msg.From}))
+	fmt.Fprintf(w, "To: %s\r\n", sanitizeAddressList(msg.To))
 	if len(msg.CC) > 0 {
-		fmt.Fprintf(w, "Cc: %s\r\n", strings.Join(msg.CC, ", "))
+		fmt.Fprintf(w, "Cc: %s\r\n", sanitizeAddressList(msg.CC))
 	}
-	fmt.Fprintf(w, "Subject: %s\r\n", encodeSubject(msg.Subject))
+	fmt.Fprintf(w, "Subject: %s\r\n", encodeSubject(safetext.SanitizeHeaderValue(msg.Subject)))
 	fmt.Fprintf(w, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	if msg.InReplyTo != "" {
-		fmt.Fprintf(w, "In-Reply-To: %s\r\n", msg.InReplyTo)
+		fmt.Fprintf(w, "In-Reply-To: %s\r\n", safetext.SanitizeHeaderValue(msg.InReplyTo))
 	}
 	if msg.References != "" {
-		fmt.Fprintf(w, "References: %s\r\n", msg.References)
+		fmt.Fprintf(w, "References: %s\r\n", safetext.SanitizeHeaderValue(msg.References))
 	}
 	fmt.Fprintf(w, "MIME-Version: 1.0\r\n")
 
@@ -194,6 +231,18 @@ func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 	w.Write(buf.Bytes())
 
 	return nil
+}
+
+// sanitizeAddressList strips CR/LF from each address and joins with ", ".
+// Addresses are ordinarily CLI-supplied (not attacker-controlled) but the
+// same CRLF sanitizer still applies to prevent injection if one is ever
+// derived from email content (e.g. a reply-to address).
+func sanitizeAddressList(addrs []string) string {
+	clean := make([]string, len(addrs))
+	for i, a := range addrs {
+		clean[i] = safetext.SanitizeHeaderValue(a)
+	}
+	return strings.Join(clean, ", ")
 }
 
 func encodeSubject(subject string) string {
