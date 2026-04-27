@@ -17,6 +17,7 @@ import (
 
 	"github.com/bscott/pm-cli/internal/config"
 	"github.com/bscott/pm-cli/internal/imap"
+	"github.com/bscott/pm-cli/internal/safetext"
 	"github.com/bscott/pm-cli/internal/smtp"
 	"github.com/emersion/go-message/mail"
 	"gopkg.in/yaml.v3"
@@ -99,12 +100,12 @@ func (c *MailListCmd) Run(ctx *Context) error {
 			flags = "-"
 		}
 
-		subject := msg.Subject
+		subject := safetext.SanitizeForTerminal(msg.Subject)
 		if len(subject) > 50 {
 			subject = subject[:47] + "..."
 		}
 
-		from := msg.From
+		from := safetext.SanitizeForTerminal(msg.From)
 		if len(from) > 25 {
 			from = from[:22] + "..."
 		}
@@ -167,8 +168,8 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		for _, att := range attachments {
 			table.AddRow(
 				fmt.Sprintf("%d", att.Index),
-				att.Filename,
-				att.ContentType,
+				safetext.SanitizeForTerminal(att.Filename),
+				safetext.SanitizeForTerminal(att.ContentType),
 				formatSize(att.Size),
 			)
 		}
@@ -226,19 +227,23 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		return nil
 	}
 
-	fmt.Printf("From:    %s\n", msg.From)
-	fmt.Printf("To:      %s\n", strings.Join(msg.To, ", "))
+	// Sanitize every field derived from the received email before printing.
+	// An attacker sending an email can embed ANSI/OSC escape sequences in
+	// headers and body; writing them to a TTY lets them obscure output or
+	// spoof terminal hyperlinks.
+	fmt.Printf("From:    %s\n", safetext.SanitizeForTerminal(msg.From))
+	fmt.Printf("To:      %s\n", safetext.SanitizeForTerminal(strings.Join(msg.To, ", ")))
 	if len(msg.CC) > 0 {
-		fmt.Printf("CC:      %s\n", strings.Join(msg.CC, ", "))
+		fmt.Printf("CC:      %s\n", safetext.SanitizeForTerminal(strings.Join(msg.CC, ", ")))
 	}
 	fmt.Printf("Date:    %s\n", msg.Date)
-	fmt.Printf("Subject: %s\n", msg.Subject)
+	fmt.Printf("Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
 	if msg.MessageID != "" {
-		fmt.Printf("Message-ID: %s\n", msg.MessageID)
+		fmt.Printf("Message-ID: %s\n", safetext.SanitizeForTerminal(msg.MessageID))
 	}
 
 	if c.Headers {
-		fmt.Printf("Flags:   %s\n", strings.Join(msg.Flags, ", "))
+		fmt.Printf("Flags:   %s\n", safetext.SanitizeForTerminal(strings.Join(msg.Flags, ", ")))
 		fmt.Printf("UID:     %d\n", msg.UID)
 		fmt.Printf("Seq:     %d\n", msg.SeqNum)
 	}
@@ -254,22 +259,22 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		if c.HTML {
 			// Output HTML body directly
 			if htmlBody != "" {
-				fmt.Println(htmlBody)
+				fmt.Println(safetext.SanitizeForTerminal(htmlBody))
 			} else if textBody != "" {
 				// No HTML, output text
-				fmt.Println(textBody)
+				fmt.Println(safetext.SanitizeForTerminal(textBody))
 			} else {
 				fmt.Println("[No body content]")
 			}
 		} else {
 			// Default: output plain text
 			if textBody != "" {
-				fmt.Println(textBody)
+				fmt.Println(safetext.SanitizeForTerminal(textBody))
 			} else if htmlBody != "" {
 				// Convert HTML to plain text
 				text := htmlToText(htmlBody)
 				if text != "" {
-					fmt.Println(text)
+					fmt.Println(safetext.SanitizeForTerminal(text))
 				} else {
 					fmt.Println("[HTML content - use --html to view]")
 				}
@@ -812,12 +817,12 @@ func (c *MailSearchCmd) Run(ctx *Context) error {
 			flags = "-"
 		}
 
-		subject := msg.Subject
+		subject := safetext.SanitizeForTerminal(msg.Subject)
 		if len(subject) > 50 {
 			subject = subject[:47] + "..."
 		}
 
-		from := msg.From
+		from := safetext.SanitizeForTerminal(msg.From)
 		if len(from) > 25 {
 			from = from[:22] + "..."
 		}
@@ -1378,7 +1383,10 @@ func (c *MailDownloadCmd) Run(ctx *Context) error {
 		})
 	}
 
-	fmt.Printf("Saved %s (%d bytes) to %s\n", attachment.Filename, len(attachment.Data), outPath)
+	fmt.Printf("Saved %s (%d bytes) to %s\n",
+		safetext.SanitizeForTerminal(attachment.Filename),
+		len(attachment.Data),
+		safetext.SanitizeForTerminal(outPath))
 	return nil
 }
 
@@ -1773,8 +1781,8 @@ func (c *MailWatchCmd) Run(ctx *Context) error {
 					})
 				} else {
 					fmt.Printf("\n[NEW] %s\n", msg.Date)
-					fmt.Printf("  From:    %s\n", msg.From)
-					fmt.Printf("  Subject: %s\n", msg.Subject)
+					fmt.Printf("  From:    %s\n", safetext.SanitizeForTerminal(msg.From))
+					fmt.Printf("  Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
 					fmt.Printf("  ID:      %d\n", msg.SeqNum)
 				}
 
@@ -1844,12 +1852,23 @@ func (c *MailWatchCmd) checkForNewMessages(ctx *Context, seenUIDs map[uint32]boo
 }
 
 func (c *MailWatchCmd) executeCommand(ctx *Context, msg imap.MessageSummary) {
-	// Replace {} with the message ID
+	// Replace {} with the (numeric, validated) sequence number. Do NOT
+	// add substitution tokens for email-derived string data (From, Subject,
+	// Message-ID, etc.) because this command is passed through `sh -c`;
+	// expose those fields via environment variables instead, where shell
+	// word-splitting still applies but the raw value is not interpolated
+	// into the command text.
 	cmdStr := strings.Replace(c.Exec, "{}", fmt.Sprintf("%d", msg.SeqNum), -1)
 
 	ctx.Formatter.Verbosef("Executing: %s", cmdStr)
 
 	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PM_MSG_SEQ=%d", msg.SeqNum),
+		fmt.Sprintf("PM_MSG_UID=%d", msg.UID),
+		"PM_MSG_FROM="+safetext.SanitizeHeaderValue(msg.From),
+		"PM_MSG_SUBJECT="+safetext.SanitizeHeaderValue(msg.Subject),
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -1908,10 +1927,10 @@ func (c *MailThreadCmd) Run(ctx *Context) error {
 		if i > 0 {
 			fmt.Println(strings.Repeat("-", 60))
 		}
-		fmt.Printf("\nFrom:    %s\n", msg.From)
-		fmt.Printf("To:      %s\n", msg.To)
+		fmt.Printf("\nFrom:    %s\n", safetext.SanitizeForTerminal(msg.From))
+		fmt.Printf("To:      %s\n", safetext.SanitizeForTerminal(msg.To))
 		fmt.Printf("Date:    %s\n", msg.Date)
-		fmt.Printf("Subject: %s\n", msg.Subject)
+		fmt.Printf("Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
 		if !msg.Seen {
 			fmt.Print("[UNREAD] ")
 		}
@@ -1919,7 +1938,7 @@ func (c *MailThreadCmd) Run(ctx *Context) error {
 		fmt.Println()
 
 		// Show body (truncated for readability)
-		body := msg.Body
+		body := safetext.SanitizeForTerminal(msg.Body)
 		if len(body) > 500 {
 			body = body[:500] + "\n[... truncated ...]"
 		}
