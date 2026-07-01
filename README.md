@@ -31,10 +31,13 @@ pm-cli config init
 pm-cli mail list                    # Latest 20 messages in INBOX
 pm-cli mail list -n 50              # Latest 50 messages
 pm-cli mail list -m Sent            # Messages in Sent folder
-pm-cli mail list --unread           # Only unread messages
+pm-cli mail list --unread           # Only unread (server-side SEARCH UNSEEN)
+pm-cli mail list --flagged          # Only flagged/starred (SEARCH FLAGGED)
 pm-cli mail list --offset 20        # Skip first 20 messages
 pm-cli mail list -p 2 -n 20         # Page 2 (messages 21-40)
 pm-cli mail list --json             # JSON output
+pm-cli mail list --json --fields uid,from_address,subject   # Project JSON fields
+pm-cli mail list --json --compact                           # Bare JSON array
 ```
 
 ### Read Messages
@@ -219,8 +222,12 @@ pm-cli mail reply 123 -b "..." --idempotency-key "reply-123-v1"
     {
       "uid": 97,
       "seq_num": 97,
-      "from": "sender@example.com",
+      "from": "Sender Name",
+      "from_address": "sender@example.com",
+      "to": ["me@example.com"],
       "subject": "Meeting tomorrow",
+      "message_id": "abc123@example.com",
+      "in_reply_to": "prev456@example.com",
       "date": "2024-01-15 10:30",
       "date_iso": "2024-01-15T10:30:00Z",
       "seen": false,

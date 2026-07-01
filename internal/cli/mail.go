@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -56,16 +57,38 @@ func (c *MailListCmd) Run(ctx *Context) error {
 		offset = (c.Page - 1) * limit
 	}
 
-	messages, err := client.ListMessages(mailbox, limit, offset, c.Unread)
+	messages, err := client.ListMessages(imap.ListOptions{
+		Mailbox:     mailbox,
+		Limit:       limit,
+		Offset:      offset,
+		UnreadOnly:  c.Unread,
+		FlaggedOnly: c.Flagged,
+	})
 	if err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
+		// --fields projects each message to the requested JSON keys; --compact
+		// emits a bare array instead of the wrapper object. Both affect JSON
+		// output only; text output below is unchanged.
+		var payload interface{} = messages
+		if c.Fields != "" {
+			projected, err := projectMessageFields(messages, c.Fields)
+			if err != nil {
+				return err
+			}
+			payload = projected
+		}
+
+		if c.Compact {
+			return ctx.Formatter.PrintJSON(payload)
+		}
+
 		result := map[string]interface{}{
 			"mailbox":  mailbox,
 			"count":    len(messages),
-			"messages": messages,
+			"messages": payload,
 			"offset":   offset,
 			"limit":    limit,
 		}
@@ -77,8 +100,13 @@ func (c *MailListCmd) Run(ctx *Context) error {
 
 	if len(messages) == 0 {
 		fmt.Printf("No %smessages in %s\n", func() string {
-			if c.Unread {
+			switch {
+			case c.Unread && c.Flagged:
+				return "unread flagged "
+			case c.Unread:
 				return "unread "
+			case c.Flagged:
+				return "flagged "
 			}
 			return ""
 		}(), mailbox)
@@ -1493,6 +1521,58 @@ func parseSize(s string) int64 {
 	return value * multiplier
 }
 
+// messageSummaryFields is the set of JSON keys a MessageSummary exposes; it
+// backs validation for the --fields flag.
+var messageSummaryFields = map[string]bool{
+	"uid": true, "seq_num": true, "from": true, "from_address": true,
+	"to": true, "subject": true, "message_id": true, "in_reply_to": true,
+	"date": true, "date_iso": true, "seen": true, "flagged": true,
+}
+
+// projectMessageFields reduces each message to only the requested JSON fields.
+// A requested field that is absent (dropped by omitempty) is emitted as null so
+// consumers get a stable shape. It only affects JSON output.
+func projectMessageFields(messages []imap.MessageSummary, fields string) ([]map[string]interface{}, error) {
+	names := splitFieldList(fields)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("--fields was set but no field names were parsed")
+	}
+	for _, n := range names {
+		if !messageSummaryFields[n] {
+			return nil, fmt.Errorf("unknown field %q for --fields (valid: uid, seq_num, from, from_address, to, subject, message_id, in_reply_to, date, date_iso, seen, flagged)", n)
+		}
+	}
+
+	out := make([]map[string]interface{}, 0, len(messages))
+	for _, m := range messages {
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode message: %w", err)
+		}
+		var full map[string]interface{}
+		if err := json.Unmarshal(raw, &full); err != nil {
+			return nil, fmt.Errorf("failed to decode message: %w", err)
+		}
+		proj := make(map[string]interface{}, len(names))
+		for _, n := range names {
+			proj[n] = full[n] // nil when omitempty dropped the key
+		}
+		out = append(out, proj)
+	}
+	return out, nil
+}
+
+// splitFieldList parses a comma-separated field list, trimming blanks.
+func splitFieldList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // parseQueryToSearchOptions converts a query string to SearchOptions
 func parseQueryToSearchOptions(query string) imap.SearchOptions {
 	from, subject, body := parseQueryString(query)
@@ -1812,7 +1892,7 @@ func (c *MailWatchCmd) populateSeenUIDs(ctx *Context, seenUIDs map[uint32]bool) 
 	defer client.Close()
 
 	// Get existing messages (reasonable limit)
-	messages, err := client.ListMessages(c.Mailbox, 100, 0, false)
+	messages, err := client.ListMessages(imap.ListOptions{Mailbox: c.Mailbox, Limit: 100})
 	if err != nil {
 		return err
 	}
@@ -1836,7 +1916,7 @@ func (c *MailWatchCmd) checkForNewMessages(ctx *Context, seenUIDs map[uint32]boo
 	defer client.Close()
 
 	// Get recent messages
-	messages, err := client.ListMessages(c.Mailbox, 50, 0, false)
+	messages, err := client.ListMessages(imap.ListOptions{Mailbox: c.Mailbox, Limit: 50})
 	if err != nil {
 		return nil, err
 	}

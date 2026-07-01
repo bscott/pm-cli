@@ -182,7 +182,10 @@ type MailListCmd struct {
 	Limit   int    `help:"Number of messages" short:"n" default:"20"`
 	Offset  int    `help:"Skip first N messages" default:"0"`
 	Page    int    `help:"Page number (1-based, combines with limit)" short:"p" default:"0"`
-	Unread  bool   `help:"Only show unread messages"`
+	Unread  bool   `help:"Only show unread messages (server-side SEARCH UNSEEN)"`
+	Flagged bool   `help:"Only show flagged/starred messages (server-side SEARCH FLAGGED)"`
+	Fields  string `help:"Comma-separated fields to include in JSON output (e.g. uid,from_address,subject)"`
+	Compact bool   `help:"Output a bare JSON array instead of the wrapper object (JSON mode only)"`
 }
 
 type MailReadCmd struct {

@@ -14,14 +14,41 @@ type MailboxStatus struct {
 }
 
 type MessageSummary struct {
-	UID     uint32 `json:"uid"`
-	SeqNum  uint32 `json:"seq_num"`
-	From    string `json:"from"`
-	Subject string `json:"subject"`
-	Date    string `json:"date"`
-	DateISO string `json:"date_iso,omitempty"`
-	Seen    bool   `json:"seen"`
-	Flagged bool   `json:"flagged"`
+	UID uint32 `json:"uid"`
+	// SeqNum is the message sequence number (the "ID" shown in text output).
+	SeqNum uint32 `json:"seq_num"`
+	// From is the sender display name when present, otherwise the address. It
+	// is kept for backward compatibility; FromAddress always carries the bare
+	// email address.
+	From string `json:"from"`
+	// FromAddress is the sender's email address (foo@example.org), useful for
+	// matching on sender/domain without a per-message `mail read`.
+	FromAddress string `json:"from_address,omitempty"`
+	// To lists the recipient addresses from the envelope.
+	To      []string `json:"to,omitempty"`
+	Subject string   `json:"subject"`
+	// MessageID is the RFC 5322 Message-ID header.
+	MessageID string `json:"message_id,omitempty"`
+	// InReplyTo is the RFC 5322 In-Reply-To header, useful for reconstructing
+	// reply chains directly from list output.
+	InReplyTo string `json:"in_reply_to,omitempty"`
+	Date      string `json:"date"`
+	DateISO   string `json:"date_iso,omitempty"`
+	Seen      bool   `json:"seen"`
+	Flagged   bool   `json:"flagged"`
+}
+
+// ListOptions controls how ListMessages selects and paginates messages.
+// UnreadOnly and FlaggedOnly are applied server-side via IMAP SEARCH so the
+// returned count respects Limit (client-side filtering could return fewer than
+// Limit results). When neither filter is set, the most recent Limit messages
+// are returned (honoring Offset).
+type ListOptions struct {
+	Mailbox     string
+	Limit       int
+	Offset      int
+	UnreadOnly  bool // SEARCH UNSEEN
+	FlaggedOnly bool // SEARCH FLAGGED
 }
 
 type Message struct {
