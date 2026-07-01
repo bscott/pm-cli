@@ -450,13 +450,23 @@ func (c *Client) DeleteMessages(mailbox string, ids []string, permanent bool) er
 		return err
 	}
 
-	// Add \Deleted flag
+	// Add \Deleted flag. A STORE against UIDs that are not present in the
+	// selected mailbox is a valid no-op per RFC 3501 and returns no error, so
+	// count the FETCH responses the server streams back (one per modified
+	// message). Zero means nothing matched and we must not report success.
 	storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 		Op:    imap.StoreFlagsAdd,
 		Flags: []imap.Flag{imap.FlagDeleted},
 	}, nil)
+	affected := 0
+	for storeCmd.Next() != nil {
+		affected++
+	}
 	if err := storeCmd.Close(); err != nil {
 		return fmt.Errorf("failed to mark message(s) for deletion: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
 	}
 
 	// Expunge if permanent
@@ -487,10 +497,18 @@ func (c *Client) CopyMessages(mailbox string, ids []string, destMailbox string) 
 		return err
 	}
 
-	// Copy to destination (does not delete from source)
+	// Copy to destination (does not delete from source). A COPY of UIDs that
+	// aren't in the selected mailbox is not reported as an error by many
+	// servers (Proton Bridge included) — it simply copies nothing. Inspect the
+	// COPYUID data (SourceUIDs/DestUIDs) so a no-op copy surfaces as an error
+	// instead of a false "label added".
 	copyCmd := c.client.Copy(numSet, destMailbox)
-	if _, err := copyCmd.Wait(); err != nil {
+	copyData, err := copyCmd.Wait()
+	if err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
+	}
+	if copyData != nil && len(copyData.SourceUIDs) == 0 && len(copyData.DestUIDs) == 0 {
+		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
 	}
 
 	return nil
@@ -507,19 +525,34 @@ func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) 
 		return err
 	}
 
-	// Copy to destination
+	// Copy to destination. As with CopyMessages, a COPY that matches nothing is
+	// not an error on its own, so verify the COPYUID data before proceeding to
+	// delete from the source — otherwise a move of non-existent UIDs would
+	// silently expunge nothing yet report success.
 	copyCmd := c.client.Copy(numSet, destMailbox)
-	if _, err := copyCmd.Wait(); err != nil {
+	copyData, err := copyCmd.Wait()
+	if err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
+	if copyData != nil && len(copyData.SourceUIDs) == 0 && len(copyData.DestUIDs) == 0 {
+		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
+	}
 
-	// Delete from source
+	// Delete from source. Count the streamed FETCH responses so a STORE that
+	// modifies nothing is reported rather than silently expunged as success.
 	storeCmd := c.client.Store(numSet, &imap.StoreFlags{
 		Op:    imap.StoreFlagsAdd,
 		Flags: []imap.Flag{imap.FlagDeleted},
 	}, nil)
+	affected := 0
+	for storeCmd.Next() != nil {
+		affected++
+	}
 	if err := storeCmd.Close(); err != nil {
 		return fmt.Errorf("failed to delete from source: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
 	}
 
 	if err := c.client.Expunge().Close(); err != nil {
