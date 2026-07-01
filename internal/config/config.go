@@ -19,6 +19,12 @@ const (
 	DefaultIMAPPort = 1143
 	DefaultSMTP     = "127.0.0.1"
 	DefaultSMTPPort = 1025
+
+	// EnvBridgePassword is the environment variable consulted for the Bridge
+	// password before falling back to the system keyring. This lets pm-cli run
+	// on headless servers that have no D-Bus secret service available, where
+	// keyring.Get fails with "org.freedesktop.secrets was not provided".
+	EnvBridgePassword = "PM_CLI_BRIDGE_PASSWORD"
 )
 
 type BridgeConfig struct {
@@ -131,6 +137,15 @@ func (c *Config) SetPassword(password string) error {
 }
 
 func (c *Config) GetPassword() (string, error) {
+	// Environment variable takes precedence over the keyring so that headless
+	// and automated deployments (no D-Bus secret service) can supply the
+	// Bridge password directly. Interactive users are unaffected: the variable
+	// is only consulted when it is set and non-empty. Because the env var
+	// carries the credential itself, no configured email is required for it.
+	if pw := os.Getenv(EnvBridgePassword); pw != "" {
+		return pw, nil
+	}
+
 	if c.Bridge.Email == "" {
 		return "", errors.New("email not configured")
 	}

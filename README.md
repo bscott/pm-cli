@@ -277,6 +277,21 @@ defaults:
 
 Password is stored securely in the system keyring (libsecret on Linux).
 
+### Headless / automated environments
+
+Servers without a desktop session often have no D-Bus secret service, so the
+keyring is unavailable. Set the `PM_CLI_BRIDGE_PASSWORD` environment variable
+and pm-cli will use it instead of the keyring:
+
+```bash
+export PM_CLI_BRIDGE_PASSWORD='your-bridge-password'
+pm-cli mail list
+```
+
+The environment variable takes precedence over the keyring and is only
+consulted when set, so interactive users are unaffected. Prefer injecting it
+from a secrets manager rather than hardcoding it in shell profiles.
+
 ## Global Flags
 
 | Flag | Description |
