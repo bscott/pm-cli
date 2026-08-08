@@ -35,6 +35,18 @@ Targeted for the 0.2.6 release.
   supplied via the environment variable added in this release was inherited by the
   user-supplied command and by anything it shelled out to. Child environments are now
   built through `config.ScrubSecrets`.
+- `mail download` refuses to overwrite an existing file unless `--force` is given.
+  The default output name comes from the sender-controlled MIME filename, so a
+  crafted attachment could previously replace a file in the working directory
+  (`.bashrc`, for example) with no prompt.
+- Single-line display fields (Subject, From, To, attachment filenames) have newlines
+  and tabs folded to spaces before rendering. A newline inside an RFC 2047
+  encoded-word survives envelope decoding, which let a crafted Subject close its row
+  and forge additional fake rows in `mail list` output.
+- `mail list` truncates long Subject and From values by rune rather than by byte, so
+  a multi-byte character is no longer split into invalid UTF-8.
+- A failed read of attachment data is reported instead of discarded. Previously a
+  short read was written to disk as though it were the complete attachment.
 
 ### Changed
 - `mail list --unread` now returns up to `--limit` unread messages. Previously the

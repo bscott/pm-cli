@@ -1228,7 +1228,12 @@ func (c *Client) DownloadAttachment(mailbox, id string, index int) ([]byte, stri
 			break
 		}
 		if bodyData, ok := item.(imapclient.FetchItemDataBodySection); ok {
-			data, _ = io.ReadAll(bodyData.Literal)
+			// Do not discard this error: a short read here would otherwise be
+			// written to disk as though it were the complete attachment.
+			data, err = io.ReadAll(bodyData.Literal)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to read attachment data: %w", err)
+			}
 		}
 	}
 

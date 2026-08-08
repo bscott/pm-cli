@@ -128,15 +128,8 @@ func (c *MailListCmd) Run(ctx *Context) error {
 			flags = "-"
 		}
 
-		subject := safetext.SanitizeForTerminal(msg.Subject)
-		if len(subject) > 50 {
-			subject = subject[:47] + "..."
-		}
-
-		from := safetext.SanitizeForTerminal(msg.From)
-		if len(from) > 25 {
-			from = from[:22] + "..."
-		}
+		subject := safetext.TruncateRunes(safetext.SanitizeSingleLine(msg.Subject), 50)
+		from := safetext.TruncateRunes(safetext.SanitizeSingleLine(msg.From), 25)
 
 		table.AddRow(
 			fmt.Sprintf("%d", msg.SeqNum),
@@ -196,8 +189,8 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 		for _, att := range attachments {
 			table.AddRow(
 				fmt.Sprintf("%d", att.Index),
-				safetext.SanitizeForTerminal(att.Filename),
-				safetext.SanitizeForTerminal(att.ContentType),
+				safetext.SanitizeSingleLine(att.Filename),
+				safetext.SanitizeSingleLine(att.ContentType),
 				formatSize(att.Size),
 			)
 		}
@@ -259,19 +252,19 @@ func (c *MailReadCmd) Run(ctx *Context) error {
 	// An attacker sending an email can embed ANSI/OSC escape sequences in
 	// headers and body; writing them to a TTY lets them obscure output or
 	// spoof terminal hyperlinks.
-	fmt.Printf("From:    %s\n", safetext.SanitizeForTerminal(msg.From))
-	fmt.Printf("To:      %s\n", safetext.SanitizeForTerminal(strings.Join(msg.To, ", ")))
+	fmt.Printf("From:    %s\n", safetext.SanitizeSingleLine(msg.From))
+	fmt.Printf("To:      %s\n", safetext.SanitizeSingleLine(strings.Join(msg.To, ", ")))
 	if len(msg.CC) > 0 {
-		fmt.Printf("CC:      %s\n", safetext.SanitizeForTerminal(strings.Join(msg.CC, ", ")))
+		fmt.Printf("CC:      %s\n", safetext.SanitizeSingleLine(strings.Join(msg.CC, ", ")))
 	}
 	fmt.Printf("Date:    %s\n", msg.Date)
-	fmt.Printf("Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
+	fmt.Printf("Subject: %s\n", safetext.SanitizeSingleLine(msg.Subject))
 	if msg.MessageID != "" {
-		fmt.Printf("Message-ID: %s\n", safetext.SanitizeForTerminal(msg.MessageID))
+		fmt.Printf("Message-ID: %s\n", safetext.SanitizeSingleLine(msg.MessageID))
 	}
 
 	if c.Headers {
-		fmt.Printf("Flags:   %s\n", safetext.SanitizeForTerminal(strings.Join(msg.Flags, ", ")))
+		fmt.Printf("Flags:   %s\n", safetext.SanitizeSingleLine(strings.Join(msg.Flags, ", ")))
 		fmt.Printf("UID:     %d\n", msg.UID)
 		fmt.Printf("Seq:     %d\n", msg.SeqNum)
 	}
@@ -845,15 +838,8 @@ func (c *MailSearchCmd) Run(ctx *Context) error {
 			flags = "-"
 		}
 
-		subject := safetext.SanitizeForTerminal(msg.Subject)
-		if len(subject) > 50 {
-			subject = subject[:47] + "..."
-		}
-
-		from := safetext.SanitizeForTerminal(msg.From)
-		if len(from) > 25 {
-			from = from[:22] + "..."
-		}
+		subject := safetext.TruncateRunes(safetext.SanitizeSingleLine(msg.Subject), 50)
+		from := safetext.TruncateRunes(safetext.SanitizeSingleLine(msg.From), 25)
 
 		table.AddRow(
 			fmt.Sprintf("%d", msg.SeqNum),
@@ -1396,9 +1382,13 @@ func (c *MailDownloadCmd) Run(ctx *Context) error {
 		}
 	}
 
-	// Write file
-	if err := os.WriteFile(outPath, attachment.Data, 0644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+	// Write the file. The name is attacker-controlled: filepath.Base stops
+	// traversal, but the remaining basename can still collide with something
+	// important in the working directory (.bashrc, Makefile, a source file).
+	// Refuse to clobber an existing file unless --force, so a malicious
+	// attachment cannot silently replace one.
+	if err := writeNewFile(outPath, attachment.Data, c.Force); err != nil {
+		return err
 	}
 
 	if ctx.Formatter.JSON {
@@ -1412,9 +1402,37 @@ func (c *MailDownloadCmd) Run(ctx *Context) error {
 	}
 
 	fmt.Printf("Saved %s (%d bytes) to %s\n",
-		safetext.SanitizeForTerminal(attachment.Filename),
+		safetext.SanitizeSingleLine(attachment.Filename),
 		len(attachment.Data),
-		safetext.SanitizeForTerminal(outPath))
+		safetext.SanitizeSingleLine(outPath))
+	return nil
+}
+
+// writeNewFile writes data to path, refusing to overwrite an existing file
+// unless force is set. The exclusion is done with O_EXCL rather than a
+// stat-then-write check, so there is no window between the two.
+func writeNewFile(path string, data []byte, force bool) error {
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+
+	f, err := os.OpenFile(path, flags, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("refusing to overwrite existing file %s (use --force to replace it, or --out to choose another path)", path)
+		}
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
 	return nil
 }
 
@@ -1861,8 +1879,8 @@ func (c *MailWatchCmd) Run(ctx *Context) error {
 					})
 				} else {
 					fmt.Printf("\n[NEW] %s\n", msg.Date)
-					fmt.Printf("  From:    %s\n", safetext.SanitizeForTerminal(msg.From))
-					fmt.Printf("  Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
+					fmt.Printf("  From:    %s\n", safetext.SanitizeSingleLine(msg.From))
+					fmt.Printf("  Subject: %s\n", safetext.SanitizeSingleLine(msg.Subject))
 					fmt.Printf("  ID:      %d\n", msg.SeqNum)
 				}
 
@@ -2011,10 +2029,10 @@ func (c *MailThreadCmd) Run(ctx *Context) error {
 		if i > 0 {
 			fmt.Println(strings.Repeat("-", 60))
 		}
-		fmt.Printf("\nFrom:    %s\n", safetext.SanitizeForTerminal(msg.From))
-		fmt.Printf("To:      %s\n", safetext.SanitizeForTerminal(msg.To))
+		fmt.Printf("\nFrom:    %s\n", safetext.SanitizeSingleLine(msg.From))
+		fmt.Printf("To:      %s\n", safetext.SanitizeSingleLine(msg.To))
 		fmt.Printf("Date:    %s\n", msg.Date)
-		fmt.Printf("Subject: %s\n", safetext.SanitizeForTerminal(msg.Subject))
+		fmt.Printf("Subject: %s\n", safetext.SanitizeSingleLine(msg.Subject))
 		if !msg.Seen {
 			fmt.Print("[UNREAD] ")
 		}

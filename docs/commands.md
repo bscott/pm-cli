@@ -427,6 +427,12 @@ pm-cli mail download <id> <index> [flags]
 | Flag | Description |
 |------|-------------|
 | `-o, --out` | Output path (default: original filename) |
+| `-f, --force` | Overwrite the output file if it already exists |
+
+The default output name comes from the attachment's MIME filename, which is
+chosen by the sender. Directory components are stripped, and an existing file is
+never replaced unless `--force` is given — otherwise a crafted attachment could
+overwrite a file in the working directory (for example `.bashrc`).
 
 **Examples:**
 ```bash
@@ -436,6 +442,9 @@ pm-cli mail read 123 --attachments
 # Then download by index
 pm-cli mail download 123 0
 pm-cli mail download 123 0 -o ~/Downloads/report.pdf
+
+# Replace an existing file deliberately
+pm-cli mail download 123 0 --force
 ```
 
 ### mail batch

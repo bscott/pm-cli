@@ -243,6 +243,7 @@ type MailDownloadCmd struct {
 	ID    string `arg:"" help:"Message sequence number or uid:<uid>"`
 	Index int    `arg:"" help:"Attachment index (0-based)"`
 	Out   string `help:"Output path (default: original filename)" short:"o"`
+	Force bool   `help:"Overwrite the output file if it already exists" short:"f"`
 }
 
 type MailMoveCmd struct {

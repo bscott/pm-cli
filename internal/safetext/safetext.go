@@ -17,6 +17,42 @@ func SanitizeHeaderValue(v string) string {
 	return v
 }
 
+// SanitizeSingleLine is SanitizeForTerminal plus newline and tab folding, for
+// values rendered as one field of a single line (a Subject or From in the
+// `mail list` table, or a header line in `mail read`).
+//
+// SanitizeForTerminal deliberately preserves newlines and tabs, which is right
+// for message bodies but not for these fields: an RFC 2047 encoded-word can
+// carry a raw newline through envelope decoding, letting a crafted Subject
+// close its row and forge additional, entirely fake rows in the output. Tabs
+// are folded too because the table is tab-delimited.
+func SanitizeSingleLine(s string) string {
+	s = SanitizeForTerminal(s)
+	if !strings.ContainsAny(s, "\n\t") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	return s
+}
+
+// TruncateRunes shortens s to at most max runes, appending an ellipsis when it
+// had to cut. Truncation is rune-aware: slicing a UTF-8 string by bytes can
+// split a multi-byte character and emit invalid UTF-8.
+func TruncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
+}
+
 // SanitizeForTerminal strips C0/C1 control characters (including ANSI
 // escape prefix 0x1B) and DEL, preserving tab and newline. Use on
 // attacker-controlled strings (email Subject, From, Body, attachment
