@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kong"
 	"github.com/bscott/pm-cli/internal/cli"
@@ -20,14 +21,25 @@ func main() {
 		}),
 	)
 
-	// Handle --help-json before parsing to output full schema
+	// Handle --help-json before parsing to output the full schema.
+	//
+	// Only a leading occurrence counts. Scanning the whole argument list
+	// matched flag *values* too, so `mail send -s "--help-json"` printed the
+	// schema and exited 0 without sending — a silent no-op for any script
+	// passing user-controlled text. A "--" terminator also ends the scan.
 	for _, arg := range os.Args[1:] {
+		if arg == "--" {
+			break
+		}
 		if arg == "--help-json" {
 			if err := cli.PrintHelpJSON(&c); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
 			return
+		}
+		if !strings.HasPrefix(arg, "-") {
+			break // first positional argument: everything after is command input
 		}
 	}
 

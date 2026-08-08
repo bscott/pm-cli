@@ -13,7 +13,8 @@ If you discover a security vulnerability in pm-cli, please report it responsibly
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.2.x   | :white_check_mark: |
+| < 0.2   | :x:                |
 
 ## Security Measures
 
@@ -79,9 +80,15 @@ The tool disables TLS certificate verification (`InsecureSkipVerify: true`) for 
 
 ### Attachment Downloads
 
-- Downloaded attachments are written with permissions `0644`
-- The output path for attachments is user-controlled via the `--out` flag
-- Path traversal is possible if the user specifies a path outside the current directory (this is intentional to allow saving anywhere)
+- Downloaded attachments are written with permissions `0644`, so they are readable by
+  other users on a shared machine
+- The output path for attachments is user-controlled via the `--out` flag. Writing
+  outside the current directory is intentional, to allow saving anywhere
+- The default output name is derived from the sender-controlled MIME filename.
+  Directory components are stripped, and an existing file is never replaced unless
+  `--force` is passed
+- Attachments are read fully into memory, so a very large attachment is bounded by
+  available RAM rather than by a configured limit
 
 ### Error Message Information Disclosure
 
@@ -110,4 +117,6 @@ The project uses the following external dependencies:
 
 ## Security Audit
 
-This project underwent a code review in February 2026. See `docs/security-review.md` for detailed findings.
+The most recent review covered version 0.2.6. See `docs/security-review.md` for the
+findings and their disposition. An earlier review of 0.1.0 is summarized in the same
+document.

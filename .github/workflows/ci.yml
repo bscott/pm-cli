@@ -6,6 +6,11 @@ on:
     branches:
       - master
 
+# The workflow only reads the repository. Declaring this explicitly keeps the
+# job token from inheriting broader write scopes by default.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Go test

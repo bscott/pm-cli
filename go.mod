@@ -16,5 +16,5 @@ require (
 	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )

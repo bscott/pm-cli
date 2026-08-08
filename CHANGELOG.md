@@ -63,6 +63,18 @@ Targeted for the 0.2.6 release.
   partway through an attachment or the multipart trailer previously produced a
   truncated message that was sent as though complete.
 
+- `--help-json` is only recognized as a leading flag. It was matched anywhere in the
+  argument list, so `mail send -s "--help-json"` printed the schema and exited 0
+  without sending, which a calling script could not distinguish from success.
+- `config show` and `config doctor` report which credential is in use. Both said
+  "stored in keyring" even when `PM_CLI_BRIDGE_PASSWORD` supplied the password, and
+  `doctor` reported "cannot check" when the variable was set without a configured
+  email, despite the credential working.
+- Bumped `golang.org/x/sys` to v0.44.0 for GO-2026-5024. The affected symbol is
+  Windows-only and was not reachable from this code.
+- The CI workflow declares `permissions: contents: read` rather than relying on the
+  default token scope.
+
 ### Removed
 
 - The `idempotency.json` store is replaced by an `idempotency/` directory. No

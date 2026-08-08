@@ -155,12 +155,17 @@ func (c *ConfigShowCmd) Run(ctx *Context) error {
 	fmt.Printf("  Limit:   %d\n", ctx.Config.Defaults.Limit)
 	fmt.Printf("  Format:  %s\n", ctx.Config.Defaults.Format)
 
-	// Check if password is set
+	// Report where the password actually resolved from. Reporting "keyring"
+	// unconditionally hid the case where the environment variable supplied it,
+	// leaving no way to tell which credential is in use.
 	_, err := ctx.Config.GetPassword()
 	fmt.Println()
-	if err != nil {
+	switch {
+	case err != nil:
 		fmt.Println("Password: not set (run 'pm-cli config init' to set)")
-	} else {
+	case os.Getenv(config.EnvBridgePassword) != "":
+		fmt.Printf("Password: ********** (from %s; overrides the keyring)\n", config.EnvBridgePassword)
+	default:
 		fmt.Println("Password: ********** (stored in keyring)")
 	}
 
@@ -347,19 +352,25 @@ func (c *ConfigDoctorCmd) Run(ctx *Context) error {
 		printResult("ok", fmt.Sprintf("Email configured: %s", cfg.Bridge.Email), "")
 	}
 
-	// Check 4: Password exists in keyring
-	if cfg.Bridge.Email != "" {
-		_, err := cfg.GetPassword()
-		if err != nil {
-			addResult("Password in keyring", "fail", "password not found in keyring")
-			printResult("fail", "Password in keyring", "password not found in keyring")
+	// Check 4: password is available, and from where. The environment variable
+	// resolves without a configured email, so check it before the email guard
+	// rather than reporting "cannot check" when a working credential is set.
+	switch {
+	case os.Getenv(config.EnvBridgePassword) != "":
+		detail := fmt.Sprintf("using %s (overrides the keyring)", config.EnvBridgePassword)
+		addResult("Password available", "ok", detail)
+		printResult("ok", "Password available", detail)
+	case cfg.Bridge.Email == "":
+		addResult("Password available", "fail", "cannot check - email not configured")
+		printResult("fail", "Password available", "cannot check - email not configured")
+	default:
+		if _, err := cfg.GetPassword(); err != nil {
+			addResult("Password available", "fail", "password not found in keyring")
+			printResult("fail", "Password available", "password not found in keyring")
 		} else {
-			addResult("Password in keyring", "ok", "")
-			printResult("ok", "Password in keyring", "")
+			addResult("Password available", "ok", "stored in keyring")
+			printResult("ok", "Password available", "stored in keyring")
 		}
-	} else {
-		addResult("Password in keyring", "fail", "cannot check - email not configured")
-		printResult("fail", "Password in keyring", "cannot check - email not configured")
 	}
 
 	// Check 5: IMAP port is reachable
