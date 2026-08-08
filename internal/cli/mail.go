@@ -318,13 +318,16 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
-	// Check idempotency key
+	// Reserve the idempotency key before sending, not after. Recording it
+	// afterwards left a window in which two concurrent invocations both saw
+	// the key as unused and both sent. The reservation is released below if
+	// the send fails, so the same key can be retried.
 	if c.IdempotencyKey != "" {
-		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		reserved, err := config.ReserveIdempotencyKey(c.IdempotencyKey)
 		if err != nil {
 			return fmt.Errorf("idempotency check failed: %w", err)
 		}
-		if used {
+		if !reserved {
 			if ctx.Formatter.JSON {
 				return ctx.Formatter.PrintJSON(map[string]interface{}{
 					"success":         true,
@@ -414,15 +417,11 @@ func (c *MailSendCmd) Run(ctx *Context) error {
 	ctx.Formatter.Verbosef("Sending email to %s...", strings.Join(to, ", "))
 
 	if err := smtpClient.Send(msg); err != nil {
-		return err
-	}
-
-	// Record idempotency key after successful send
-	if c.IdempotencyKey != "" {
-		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
-			// Log but don't fail - email was already sent
-			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		// Free the key so the caller can retry with the same one.
+		if relErr := config.ReleaseIdempotencyKey(c.IdempotencyKey); relErr != nil {
+			ctx.Formatter.Verbosef("Warning: failed to release idempotency key: %v", relErr)
 		}
+		return err
 	}
 
 	if ctx.Formatter.JSON {
@@ -859,13 +858,16 @@ func (c *MailReplyCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
-	// Check idempotency key
+	// Reserve the idempotency key before sending, not after. Recording it
+	// afterwards left a window in which two concurrent invocations both saw
+	// the key as unused and both sent. The reservation is released below if
+	// the send fails, so the same key can be retried.
 	if c.IdempotencyKey != "" {
-		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		reserved, err := config.ReserveIdempotencyKey(c.IdempotencyKey)
 		if err != nil {
 			return fmt.Errorf("idempotency check failed: %w", err)
 		}
-		if used {
+		if !reserved {
 			if ctx.Formatter.JSON {
 				return ctx.Formatter.PrintJSON(map[string]interface{}{
 					"success":         true,
@@ -986,14 +988,11 @@ func (c *MailReplyCmd) Run(ctx *Context) error {
 	ctx.Formatter.Verbosef("Sending reply to %s...", strings.Join(recipients, ", "))
 
 	if err := smtpClient.Send(replyMsg); err != nil {
-		return err
-	}
-
-	// Record idempotency key after successful send
-	if c.IdempotencyKey != "" {
-		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
-			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		// Free the key so the caller can retry with the same one.
+		if relErr := config.ReleaseIdempotencyKey(c.IdempotencyKey); relErr != nil {
+			ctx.Formatter.Verbosef("Warning: failed to release idempotency key: %v", relErr)
 		}
+		return err
 	}
 
 	if ctx.Formatter.JSON {
@@ -1021,13 +1020,16 @@ func (c *MailForwardCmd) Run(ctx *Context) error {
 		return fmt.Errorf("not configured - run 'pm-cli config init' first")
 	}
 
-	// Check idempotency key
+	// Reserve the idempotency key before sending, not after. Recording it
+	// afterwards left a window in which two concurrent invocations both saw
+	// the key as unused and both sent. The reservation is released below if
+	// the send fails, so the same key can be retried.
 	if c.IdempotencyKey != "" {
-		used, err := config.CheckIdempotencyKey(c.IdempotencyKey)
+		reserved, err := config.ReserveIdempotencyKey(c.IdempotencyKey)
 		if err != nil {
 			return fmt.Errorf("idempotency check failed: %w", err)
 		}
-		if used {
+		if !reserved {
 			if ctx.Formatter.JSON {
 				return ctx.Formatter.PrintJSON(map[string]interface{}{
 					"success":         true,
@@ -1118,14 +1120,11 @@ func (c *MailForwardCmd) Run(ctx *Context) error {
 	ctx.Formatter.Verbosef("Forwarding email to %s...", strings.Join(c.To, ", "))
 
 	if err := smtpClient.Send(fwdMsg); err != nil {
-		return err
-	}
-
-	// Record idempotency key after successful send
-	if c.IdempotencyKey != "" {
-		if err := config.RecordIdempotencyKey(c.IdempotencyKey); err != nil {
-			ctx.Formatter.Verbosef("Warning: failed to record idempotency key: %v", err)
+		// Free the key so the caller can retry with the same one.
+		if relErr := config.ReleaseIdempotencyKey(c.IdempotencyKey); relErr != nil {
+			ctx.Formatter.Verbosef("Warning: failed to release idempotency key: %v", relErr)
 		}
+		return err
 	}
 
 	if ctx.Formatter.JSON {

@@ -47,6 +47,18 @@ Targeted for the 0.2.6 release.
   a multi-byte character is no longer split into invalid UTF-8.
 - A failed read of attachment data is reported instead of discarded. Previously a
   short read was written to disk as though it were the complete attachment.
+- Idempotency keys are reserved before a send is attempted rather than recorded after
+  it succeeds, closing a window in which two concurrent invocations both saw the key
+  as unused and both sent. Reservations are now one marker file per key created with
+  `O_EXCL`, which is atomic across processes; a failed send releases the key so it can
+  be retried. Previously a corrupt store also silently disabled the protection
+  entirely, because a JSON parse error returned an empty store.
+
+### Removed
+
+- The `idempotency.json` store is replaced by an `idempotency/` directory. No
+  migration is performed: keys expire after 24 hours, so the old file simply goes
+  unused and can be deleted.
 
 ### Changed
 - `mail list --unread` now returns up to `--limit` unread messages. Previously the

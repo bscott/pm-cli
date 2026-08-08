@@ -1,7 +1,8 @@
 package config
 
 import (
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -214,101 +215,128 @@ func Exists() bool {
 }
 
 // Idempotency support
+//
+// A key is reserved before the send is attempted, not recorded after it
+// succeeds. Recording afterwards left a window in which two concurrent
+// invocations both saw the key as unused and both sent, which defeats the
+// only purpose of the mechanism.
+//
+// Each key is one marker file whose name is a hash of the key, created with
+// O_EXCL. That makes the reservation atomic across processes without a lock
+// file, and keeps a user-supplied key (which may contain path separators) from
+// influencing the path. Expiry is read from the file's mtime, so there is no
+// stored content that could fail to parse.
 
 const idempotencyTTL = 24 * time.Hour
 
-type idempotencyStore struct {
-	Keys map[string]int64 `json:"keys"` // key -> unix timestamp
-}
-
-func idempotencyPath() (string, error) {
+func idempotencyDir() (string, error) {
 	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "idempotency.json"), nil
+	return filepath.Join(dir, "idempotency"), nil
 }
 
-func loadIdempotencyStore() (*idempotencyStore, error) {
-	path, err := idempotencyPath()
+func idempotencyMarkerPath(key string) (string, error) {
+	dir, err := idempotencyDir()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	store := &idempotencyStore{Keys: make(map[string]int64)}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return store, nil
-		}
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, store); err != nil {
-		return store, nil // Return empty store on parse error
-	}
-
-	return store, nil
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(dir, hex.EncodeToString(sum[:])), nil
 }
 
-func (s *idempotencyStore) save() error {
-	path, err := idempotencyPath()
-	if err != nil {
-		return err
-	}
-
-	// Clean expired keys
-	now := time.Now().Unix()
-	for key, ts := range s.Keys {
-		if now-ts > int64(idempotencyTTL.Seconds()) {
-			delete(s.Keys, key)
-		}
-	}
-
-	data, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0600)
-}
-
-// CheckIdempotencyKey returns true if the key was already used (within TTL)
-func CheckIdempotencyKey(key string) (bool, error) {
+// ReserveIdempotencyKey atomically claims key. It returns true when the caller
+// owns the reservation and should proceed, and false when the key is already
+// held within the TTL, meaning this is a duplicate.
+//
+// An empty key disables the mechanism and always reserves successfully.
+//
+// Errors are returned rather than swallowed: if the reservation state cannot
+// be determined, the caller must not treat that as permission to send.
+func ReserveIdempotencyKey(key string) (bool, error) {
 	if key == "" {
-		return false, nil
+		return true, nil
 	}
 
-	store, err := loadIdempotencyStore()
+	path, err := idempotencyMarkerPath(key)
 	if err != nil {
 		return false, err
 	}
-
-	ts, exists := store.Keys[key]
-	if !exists {
-		return false, nil
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return false, fmt.Errorf("failed to create idempotency directory: %w", err)
 	}
 
-	// Check if expired
-	if time.Now().Unix()-ts > int64(idempotencyTTL.Seconds()) {
-		return false, nil
+	purgeExpiredMarkers()
+
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			return true, f.Close()
+		}
+		if !os.IsExist(err) {
+			return false, fmt.Errorf("failed to reserve idempotency key: %w", err)
+		}
+
+		// The marker exists. Honor it unless it has aged out.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue // raced with a purge; try to claim it again
+			}
+			return false, fmt.Errorf("failed to read idempotency key: %w", statErr)
+		}
+		if time.Since(info.ModTime()) <= idempotencyTTL {
+			return false, nil
+		}
+		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+			return false, fmt.Errorf("failed to expire idempotency key: %w", rmErr)
+		}
 	}
 
-	return true, nil
+	// Another process claimed it between our removal and retry. Treat that as
+	// a duplicate rather than sending twice.
+	return false, nil
 }
 
-// RecordIdempotencyKey marks a key as used
-func RecordIdempotencyKey(key string) error {
+// ReleaseIdempotencyKey drops a reservation, so a send that failed can be
+// retried with the same key. It is not an error to release a key that is not
+// held.
+func ReleaseIdempotencyKey(key string) error {
 	if key == "" {
 		return nil
 	}
-
-	store, err := loadIdempotencyStore()
+	path, err := idempotencyMarkerPath(key)
 	if err != nil {
 		return err
 	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
 
-	store.Keys[key] = time.Now().Unix()
-	return store.save()
+// purgeExpiredMarkers removes aged-out reservations opportunistically. Failures
+// are ignored: this is housekeeping, and an unremoved marker only expires late.
+func purgeExpiredMarkers() {
+	dir, err := idempotencyDir()
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) > idempotencyTTL {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }
