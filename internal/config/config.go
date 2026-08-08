@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -161,6 +162,46 @@ func (c *Config) GetPassword() (string, error) {
 
 func DeletePassword(email string) error {
 	return keyring.Delete(AppName, email)
+}
+
+// secretEnvVars lists environment variables that carry pm-cli credentials and
+// must never be handed to a child process.
+var secretEnvVars = []string{EnvBridgePassword}
+
+// ScrubSecrets returns env with every pm-cli credential variable removed.
+//
+// Any code spawning a child process must build its environment from this
+// rather than from os.Environ() directly. Without it, a Bridge password
+// supplied via EnvBridgePassword is inherited by user-supplied commands (for
+// example `mail watch --exec`), handing the mail credential to arbitrary
+// third-party scripts.
+//
+// The input slice is not modified.
+func ScrubSecrets(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if isSecretEnv(kv) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// isSecretEnv reports whether a "KEY=VALUE" entry names a credential variable.
+// A bare "KEY" with no "=" is matched too, since Go permits such entries and
+// dropping them is the safe direction.
+func isSecretEnv(kv string) bool {
+	name := kv
+	if i := strings.IndexByte(kv, '='); i >= 0 {
+		name = kv[:i]
+	}
+	for _, secret := range secretEnvVars {
+		if name == secret {
+			return true
+		}
+	}
+	return false
 }
 
 func Exists() bool {

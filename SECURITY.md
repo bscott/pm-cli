@@ -28,6 +28,24 @@ If you discover a security vulnerability in pm-cli, please report it responsibly
 - Config file permissions are set to `0600` (owner read/write only)
 - Config directory permissions are set to `0700`
 
+#### Environment variable credentials
+
+`PM_CLI_BRIDGE_PASSWORD` supplies the Bridge password directly, for headless
+environments with no secret service available. When set and non-empty it takes
+precedence over the keyring.
+
+This trades some protection for portability, and the tradeoff should be a
+deliberate choice:
+
+- The value is readable by any process running as the same user, and appears in
+  `/proc/<pid>/environ` on Linux.
+- It may be captured by shell history or process listings depending on how it is set.
+- pm-cli removes it from the environment of child processes it spawns (see
+  `config.ScrubSecrets`), so `mail watch --exec` commands do not inherit it.
+
+Prefer the system keyring on interactive machines. Where the variable is required,
+inject it from a secrets manager rather than a shell profile.
+
 ### Network Security
 
 - All connections to Proton Bridge use TLS encryption

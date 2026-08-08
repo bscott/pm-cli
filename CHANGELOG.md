@@ -30,6 +30,11 @@ Targeted for the 0.2.6 release.
 - The COPY no-match check is gated on the server advertising UIDPLUS, since COPYUID is
   only guaranteed there; without the guard every successful copy on a non-UIDPLUS
   server would have been reported as a failure (#17).
+- `mail watch --exec` no longer passes `PM_CLI_BRIDGE_PASSWORD` to the command it
+  runs. The child environment was built from `os.Environ()`, so a Bridge password
+  supplied via the environment variable added in this release was inherited by the
+  user-supplied command and by anything it shelled out to. Child environments are now
+  built through `config.ScrubSecrets`.
 
 ### Changed
 - `mail list --unread` now returns up to `--limit` unread messages. Previously the

@@ -1943,7 +1943,11 @@ func (c *MailWatchCmd) executeCommand(ctx *Context, msg imap.MessageSummary) {
 	ctx.Formatter.Verbosef("Executing: %s", cmdStr)
 
 	cmd := exec.Command("sh", "-c", cmdStr)
-	cmd.Env = append(os.Environ(),
+	// Build the child environment from ScrubSecrets, never os.Environ()
+	// directly: a Bridge password supplied via PM_CLI_BRIDGE_PASSWORD would
+	// otherwise be inherited by this user-supplied command and by everything
+	// it shells out to.
+	cmd.Env = append(config.ScrubSecrets(os.Environ()),
 		fmt.Sprintf("PM_MSG_SEQ=%d", msg.SeqNum),
 		fmt.Sprintf("PM_MSG_UID=%d", msg.UID),
 		"PM_MSG_FROM="+safetext.SanitizeHeaderValue(msg.From),
