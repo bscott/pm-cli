@@ -119,12 +119,19 @@ func extractMailCommands() CommandSchema {
 				Flags: []FlagSchema{
 					{Name: "--mailbox", Short: "-m", Type: "string", Default: "INBOX", Description: "Mailbox name"},
 					{Name: "--limit", Short: "-n", Type: "int", Default: "20", Description: "Number of messages to show"},
-					{Name: "--unread", Type: "bool", Description: "Only show unread messages"},
+					{Name: "--offset", Type: "int", Default: "0", Description: "Skip first N messages"},
+					{Name: "--page", Short: "-p", Type: "int", Default: "0", Description: "Page number (1-based, combines with limit)"},
+					{Name: "--unread", Type: "bool", Description: "Only show unread messages (server-side SEARCH UNSEEN)"},
+					{Name: "--flagged", Type: "bool", Description: "Only show flagged/starred messages (server-side SEARCH FLAGGED)"},
+					{Name: "--fields", Type: "string", Description: "Comma-separated fields to include in JSON output (uid, seq_num, from, from_address, to, subject, message_id, in_reply_to, date, date_iso, seen, flagged)"},
+					{Name: "--compact", Type: "bool", Description: "Output a bare JSON array instead of the wrapper object (JSON mode only)"},
 				},
 				Examples: []string{
 					"pm-cli mail list",
 					"pm-cli mail list --unread --json",
+					"pm-cli mail list --flagged --json",
 					"pm-cli mail list -m Sent -n 10",
+					"pm-cli mail list --json --fields uid,from_address,subject --compact",
 				},
 			},
 			{

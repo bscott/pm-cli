@@ -583,11 +583,28 @@ func (c *Client) CopyMessages(mailbox string, ids []string, destMailbox string) 
 	if err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
-	if copyData != nil && len(copyData.SourceUIDs) == 0 && len(copyData.DestUIDs) == 0 {
+	if c.copyMatchedNothing(copyData) {
 		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
 	}
 
 	return nil
+}
+
+// copyMatchedNothing reports whether a COPY provably affected no messages.
+//
+// The evidence is the COPYUID response code, which is only emitted by servers
+// advertising UIDPLUS (folded into IMAP4rev2). Without that capability an empty
+// SourceUIDs/DestUIDs pair means "the server never told us", not "nothing was
+// copied" — treating it as the latter would fail every successful copy. So we
+// only draw the conclusion when the capability guarantees the data is present.
+func (c *Client) copyMatchedNothing(data *imap.CopyData) bool {
+	if data == nil {
+		return false
+	}
+	if !c.client.Caps().Has(imap.CapUIDPlus) {
+		return false
+	}
+	return len(data.SourceUIDs) == 0 && len(data.DestUIDs) == 0
 }
 
 func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) error {
@@ -610,7 +627,7 @@ func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) 
 	if err != nil {
 		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
 	}
-	if copyData != nil && len(copyData.SourceUIDs) == 0 && len(copyData.DestUIDs) == 0 {
+	if c.copyMatchedNothing(copyData) {
 		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
 	}
 

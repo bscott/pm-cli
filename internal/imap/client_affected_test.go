@@ -206,7 +206,7 @@ func TestMoveMessagesActuallyMoves(t *testing.T) {
 		t.Fatalf("MoveMessages: %v", err)
 	}
 
-	inbox, err := fx.client.ListMessages("INBOX", 50, 0, false)
+	inbox, err := fx.client.ListMessages(ListOptions{Mailbox: "INBOX", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListMessages INBOX: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestMoveMessagesActuallyMoves(t *testing.T) {
 		t.Errorf("expected INBOX empty after move, got %d messages", len(inbox))
 	}
 
-	archive, err := fx.client.ListMessages("Archive", 50, 0, false)
+	archive, err := fx.client.ListMessages(ListOptions{Mailbox: "Archive", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListMessages Archive: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestMissingUIDDoesNotMutateMailbox(t *testing.T) {
 
 	_ = fx.client.DeleteMessages("INBOX", []string{missingSelector(uid)}, true)
 
-	msgs, err := fx.client.ListMessages("INBOX", 50, 0, false)
+	msgs, err := fx.client.ListMessages(ListOptions{Mailbox: "INBOX", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
