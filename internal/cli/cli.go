@@ -5,7 +5,7 @@ import (
 	"github.com/bscott/pm-cli/internal/output"
 )
 
-var Version = "0.2.5"
+var Version = "0.2.6"
 
 type Globals struct {
 	JSON     bool   `help:"Output as JSON" name:"json"`
@@ -99,6 +99,12 @@ type MailCmd struct {
 	Label     LabelCmd         `cmd:"" help:"Manage message labels"`
 	Summarize MailSummarizeCmd `cmd:"" help:"Summarize message for AI processing"`
 	Extract   MailExtractCmd   `cmd:"" help:"Extract structured data from message"`
+	Batch     MailBatchCmd     `cmd:"" help:"Run multiple operations in one IMAP session (JSON from stdin)"`
+}
+
+type MailBatchCmd struct {
+	File        string `help:"Read operations from a file instead of stdin" short:"f" type:"existingfile"`
+	StopOnError bool   `help:"Stop after the first failed operation" name:"stop-on-error"`
 }
 
 type MailSummarizeCmd struct {

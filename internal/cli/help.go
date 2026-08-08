@@ -251,6 +251,19 @@ func extractMailCommands() CommandSchema {
 					"pm-cli mail search '' --since 2024-01-01 --json",
 				},
 			},
+			{
+				Name:        "mail batch",
+				Description: "Run multiple operations in one IMAP session (JSON array on stdin)",
+				Flags: []FlagSchema{
+					{Name: "--file", Short: "-f", Type: "string", Description: "Read operations from a file instead of stdin"},
+					{Name: "--stop-on-error", Type: "bool", Description: "Stop after the first failed operation"},
+				},
+				Examples: []string{
+					`echo '[{"op":"flag","uids":["uid:123"],"read":true}]' | pm-cli mail batch --json`,
+					`echo '[{"op":"label","uids":["uid:1"],"label":"Work"},{"op":"archive","uids":["uid:2"]}]' | pm-cli mail batch --json`,
+					"pm-cli mail batch --file ops.json --json --stop-on-error",
+				},
+			},
 		},
 	}
 }

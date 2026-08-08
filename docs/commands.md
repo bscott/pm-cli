@@ -14,6 +14,12 @@ These flags are available on all commands:
 | `-v, --verbose` | Verbose output |
 | `-q, --quiet` | Suppress non-essential output |
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PM_CLI_BRIDGE_PASSWORD` | Bridge password. When set (non-empty) it is used in preference to the system keyring. Intended for headless/CI environments with no secret service; interactive users should prefer the keyring (`pm-cli config init`). |
+
 ---
 
 ## config
@@ -121,11 +127,23 @@ pm-cli mail list [flags]
 | `--offset` | Skip first N messages | 0 |
 | `-p, --page` | Page number (1-based) | 0 |
 | `--unread` | Only show unread messages | false |
+| `--flagged` | Only show flagged/starred messages | false |
+| `--fields` | Comma-separated fields for JSON output | (all) |
+| `--compact` | Bare JSON array instead of wrapper object | false |
+
+**Filtering:**
+- `--unread` and `--flagged` use a server-side IMAP `SEARCH`, so the result honors `--limit` instead of being thinned out by client-side filtering. They can be combined.
 
 **Pagination:**
 - Use `--offset` to skip messages (e.g., `--offset 20` skips the 20 most recent)
 - Use `--page` for page-based navigation (e.g., `-p 2 -n 20` shows messages 21-40)
 - JSON output includes `offset`, `limit`, and `page` fields
+
+**JSON fields (`--json`):** Each message includes `uid`, `seq_num`, `from`, `from_address`, `to`, `message_id`, `in_reply_to`, `subject`, `date`, `date_iso`, `seen`, `flagged`. (`from` is the display name when present; `from_address` is always the bare address.) Empty fields are omitted.
+
+**Field selection (JSON only):**
+- `--fields` projects each message onto only the named fields, e.g. `--fields uid,subject,from_address`. Valid names: `uid`, `seq_num`, `from`, `from_address`, `to`, `message_id`, `in_reply_to`, `subject`, `date`, `date_iso`, `seen`, `flagged`.
+- `--compact` emits a bare JSON array (no `mailbox`/`count`/`messages` wrapper). Both flags only affect `--json` mode; text output is unchanged.
 
 **Examples:**
 ```bash
@@ -133,7 +151,12 @@ pm-cli mail list
 pm-cli mail list -n 50
 pm-cli mail list -m Sent
 pm-cli mail list --unread
+pm-cli mail list --flagged --json
 pm-cli mail list --json
+
+# Field selection
+pm-cli mail list --json --fields uid,subject,from_address
+pm-cli mail list --json --fields uid,subject --compact
 
 # Pagination
 pm-cli mail list --offset 20           # Skip 20 most recent
@@ -413,6 +436,36 @@ pm-cli mail read 123 --attachments
 # Then download by index
 pm-cli mail download 123 0
 pm-cli mail download 123 0 -o ~/Downloads/report.pdf
+```
+
+### mail batch
+
+Run multiple operations over a single IMAP session. Reads a JSON array of operations from stdin (or a file via `--file`), avoiding a fresh connection and auth round-trip per operation. Intended for automated triage that applies labels, flags, and moves to many messages per run.
+
+```bash
+pm-cli mail batch [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-f, --file` | Read operations from a file instead of stdin |
+| `--stop-on-error` | Stop after the first failed operation |
+
+All operations are validated up front (unknown ops, missing required fields, and IMAP special characters in names are rejected before any connection is opened). Input is capped at 10MB. Output (`--json`) reports per-operation success/failure plus totals.
+
+See [batch-format.md](batch-format.md) for the full operation schema.
+
+**Examples:**
+```bash
+# Mark a message read, then archive another, in one session
+echo '[
+  {"op": "flag",    "uids": ["uid:123"], "read": true},
+  {"op": "archive", "uids": ["uid:456"]}
+]' | pm-cli mail batch --json
+
+# Apply a label and stop on the first failure
+pm-cli mail batch --file ops.json --json --stop-on-error
 ```
 
 ### mail draft
