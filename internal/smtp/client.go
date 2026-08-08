@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"net/textproto"
@@ -165,8 +166,7 @@ func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 		fmt.Fprintf(w, "Content-Type: text/plain; charset=utf-8\r\n")
 		fmt.Fprintf(w, "Content-Transfer-Encoding: quoted-printable\r\n")
 		fmt.Fprintf(w, "\r\n")
-		fmt.Fprintf(w, "%s\r\n", msg.Body)
-		return nil
+		return writeQuotedPrintable(w, msg.Body)
 	}
 
 	// Multipart message with attachments
@@ -185,7 +185,9 @@ func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 	if err != nil {
 		return err
 	}
-	part.Write([]byte(msg.Body))
+	if err := writeQuotedPrintable(part, msg.Body); err != nil {
+		return err
+	}
 
 	// Attachment parts
 	for _, attachPath := range msg.Attachments {
@@ -217,19 +219,46 @@ func (c *Client) writeMessage(w io.Writer, msg *Message) error {
 		}
 
 		encoded := base64.StdEncoding.EncodeToString(content)
-		// Write base64 in chunks of 76 characters
+		// Write base64 in chunks of 76 characters. Check every write: a
+		// silently dropped error here would send a truncated attachment while
+		// reporting success.
 		for len(encoded) > 76 {
-			part.Write([]byte(encoded[:76] + "\r\n"))
+			if _, err := io.WriteString(part, encoded[:76]+"\r\n"); err != nil {
+				return fmt.Errorf("failed to write attachment %s: %w", attachPath, err)
+			}
 			encoded = encoded[76:]
 		}
 		if len(encoded) > 0 {
-			part.Write([]byte(encoded))
+			if _, err := io.WriteString(part, encoded); err != nil {
+				return fmt.Errorf("failed to write attachment %s: %w", attachPath, err)
+			}
 		}
 	}
 
-	mpWriter.Close()
-	w.Write(buf.Bytes())
+	if err := mpWriter.Close(); err != nil {
+		return fmt.Errorf("failed to finalize message: %w", err)
+	}
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write message body: %w", err)
+	}
 
+	return nil
+}
+
+// writeQuotedPrintable encodes body as quoted-printable, matching the
+// Content-Transfer-Encoding header the message declares. Previously the header
+// said quoted-printable while the raw body was written verbatim, so any "="
+// in the text was decoded as an escape by conforming receivers and any
+// non-ASCII byte went out as undeclared 8-bit content.
+func writeQuotedPrintable(w io.Writer, body string) error {
+	qp := quotedprintable.NewWriter(w)
+	if _, err := io.WriteString(qp, body); err != nil {
+		qp.Close()
+		return fmt.Errorf("failed to encode body: %w", err)
+	}
+	if err := qp.Close(); err != nil {
+		return fmt.Errorf("failed to encode body: %w", err)
+	}
 	return nil
 }
 

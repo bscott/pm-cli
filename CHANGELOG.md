@@ -54,6 +54,15 @@ Targeted for the 0.2.6 release.
   be retried. Previously a corrupt store also silently disabled the protection
   entirely, because a JSON parse error returned an empty store.
 
+- Outgoing message bodies are encoded as quoted-printable, matching the
+  `Content-Transfer-Encoding` header the message has always declared. The raw body was
+  written verbatim, so conforming receivers decoded any `=` in the text as an escape
+  sequence and non-ASCII text went out as undeclared 8-bit content. Affects
+  `mail send`, `mail reply`, and `mail forward`, with and without attachments.
+- Write errors while building a message are reported instead of discarded. A failure
+  partway through an attachment or the multipart trailer previously produced a
+  truncated message that was sent as though complete.
+
 ### Removed
 
 - The `idempotency.json` store is replaced by an `idempotency/` directory. No
