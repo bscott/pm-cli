@@ -5,9 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.6] - 2026-08-09
 
-Targeted for the 0.2.6 release.
+Validated against Proton Bridge 3.25.0 before release: the IMAP no-match detection,
+server-side `--unread`/`--flagged` filtering, and the archive and move paths were each
+exercised against a live Bridge rather than only the in-memory test server. Bridge
+advertises UIDPLUS, so the COPYUID check added in this release operates at full
+strength.
 
 ### Added
 - `mail batch` subcommand: execute multiple label/unlabel/archive/move/flag/delete
