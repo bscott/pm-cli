@@ -590,21 +590,44 @@ func (c *Client) CopyMessages(mailbox string, ids []string, destMailbox string) 
 	return nil
 }
 
-// copyMatchedNothing reports whether a COPY provably affected no messages.
+// numSetsMatchedNothing reports whether UIDPLUS response data proves an
+// operation matched no messages. MOVE returns imap.NumSet values while COPY
+// returns UIDSet values, so the shared check accepts either representation.
 //
-// The evidence is the COPYUID response code, which is only emitted by servers
-// advertising UIDPLUS (folded into IMAP4rev2). Without that capability an empty
-// SourceUIDs/DestUIDs pair means "the server never told us", not "nothing was
-// copied" — treating it as the latter would fail every successful copy. So we
-// only draw the conclusion when the capability guarantees the data is present.
+// Without UIDPLUS (or IMAP4rev2, which includes it), empty source and
+// destination sets mean "the server never told us," not "nothing matched."
+func (c *Client) numSetsMatchedNothing(source, dest imap.NumSet) bool {
+	if !c.client.Caps().Has(imap.CapUIDPlus) {
+		return false
+	}
+	return numSetEmpty(source) && numSetEmpty(dest)
+}
+
+func numSetEmpty(set imap.NumSet) bool {
+	switch set := set.(type) {
+	case nil:
+		return true
+	case imap.SeqSet:
+		return len(set) == 0
+	case imap.UIDSet:
+		return len(set) == 0
+	default:
+		return false
+	}
+}
+
 func (c *Client) copyMatchedNothing(data *imap.CopyData) bool {
 	if data == nil {
 		return false
 	}
-	if !c.client.Caps().Has(imap.CapUIDPlus) {
+	return c.numSetsMatchedNothing(data.SourceUIDs, data.DestUIDs)
+}
+
+func (c *Client) moveMatchedNothing(data *imapclient.MoveData) bool {
+	if data == nil {
 		return false
 	}
-	return len(data.SourceUIDs) == 0 && len(data.DestUIDs) == 0
+	return c.numSetsMatchedNothing(data.SourceUIDs, data.DestUIDs)
 }
 
 func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) error {
@@ -618,38 +641,12 @@ func (c *Client) MoveMessages(mailbox string, ids []string, destMailbox string) 
 		return err
 	}
 
-	// Copy to destination. As with CopyMessages, a COPY that matches nothing is
-	// not an error on its own, so verify the COPYUID data before proceeding to
-	// delete from the source — otherwise a move of non-existent UIDs would
-	// silently expunge nothing yet report success.
-	copyCmd := c.client.Copy(numSet, destMailbox)
-	copyData, err := copyCmd.Wait()
+	moveData, err := c.client.Move(numSet, destMailbox).Wait()
 	if err != nil {
-		return fmt.Errorf("failed to copy messages to %s: %w", destMailbox, err)
+		return fmt.Errorf("failed to move messages to %s: %w", destMailbox, err)
 	}
-	if c.copyMatchedNothing(copyData) {
+	if c.moveMatchedNothing(moveData) {
 		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
-	}
-
-	// Delete from source. Count the streamed FETCH responses so a STORE that
-	// modifies nothing is reported rather than silently expunged as success.
-	storeCmd := c.client.Store(numSet, &imap.StoreFlags{
-		Op:    imap.StoreFlagsAdd,
-		Flags: []imap.Flag{imap.FlagDeleted},
-	}, nil)
-	affected := 0
-	for storeCmd.Next() != nil {
-		affected++
-	}
-	if err := storeCmd.Close(); err != nil {
-		return fmt.Errorf("failed to delete from source: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("no messages matched the given ID(s) in %s", mailbox)
-	}
-
-	if err := c.client.Expunge().Close(); err != nil {
-		return fmt.Errorf("failed to expunge: %w", err)
 	}
 
 	return nil

@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `mail move`, `mail archive`, and batch move/archive operations now use the
+  server's atomic IMAP `MOVE` command when available. This removes a data-loss
+  path where the previous unqualified `EXPUNGE` could permanently delete
+  unrelated messages already marked `\\Deleted`; the library fallback uses
+  targeted `UID EXPUNGE` on UIDPLUS servers (#28, #29).
+
 ## [0.2.6] - 2026-08-09
 
 Validated against Proton Bridge 3.25.0 before release: the IMAP no-match detection,

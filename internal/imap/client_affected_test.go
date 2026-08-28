@@ -36,10 +36,15 @@ type imapfixture struct {
 	raw    *imapclient.Client
 }
 
-// newIMAPFixture starts a fresh in-memory server with an INBOX and an Archive
-// mailbox, appends one message to INBOX, and returns a Client bound to it along
-// with the UID of the seeded message.
+// newIMAPFixture starts a fresh IMAP4rev2 in-memory server with an INBOX and
+// Archive mailbox, appends one message to INBOX, and returns a Client bound to
+// it along with the UID of the seeded message.
 func newIMAPFixture(t *testing.T) (*imapfixture, imap.UID) {
+	t.Helper()
+	return newIMAPFixtureWithCaps(t, imap.CapSet{imap.CapIMAP4rev2: {}})
+}
+
+func newIMAPFixtureWithCaps(t *testing.T, caps imap.CapSet) (*imapfixture, imap.UID) {
 	t.Helper()
 
 	memServer := imapmemserver.New()
@@ -50,8 +55,7 @@ func newIMAPFixture(t *testing.T) (*imapfixture, imap.UID) {
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return memServer.NewSession(), nil, nil
 		},
-		// IMAP4rev2 folds in UIDPLUS/MOVE/ESEARCH, giving us COPYUID data.
-		Caps:         imap.CapSet{imap.CapIMAP4rev2: {}},
+		Caps:         caps,
 		InsecureAuth: true,
 	})
 
@@ -221,6 +225,52 @@ func TestMoveMessagesActuallyMoves(t *testing.T) {
 	if len(archive) != 1 {
 		t.Errorf("expected 1 message in Archive after move, got %d", len(archive))
 	}
+}
+
+func TestMoveMessagesDoesNotExpungeUnrelatedDeletedMessage(t *testing.T) {
+	fx, uidA := newIMAPFixture(t)
+	uidB := appendMessage(t, fx.raw, "INBOX", "second@example.com")
+
+	if err := fx.client.DeleteMessages("INBOX", []string{presentSelector(uidA)}, false); err != nil {
+		t.Fatalf("soft delete unrelated message: %v", err)
+	}
+	if err := fx.client.MoveMessages("INBOX", []string{presentSelector(uidB)}, "Archive"); err != nil {
+		t.Fatalf("move other message: %v", err)
+	}
+
+	assertMessageStillInInbox(t, fx.client, uidA, uidB)
+}
+
+func TestMoveMessagesFallbackDoesNotExpungeUnrelatedDeletedMessage(t *testing.T) {
+	caps := imap.CapSet{imap.CapIMAP4rev1: {}, imap.CapUIDPlus: {}}
+	fx, uidA := newIMAPFixtureWithCaps(t, caps)
+	uidB := appendMessage(t, fx.raw, "INBOX", "second@example.com")
+
+	if fx.client.client.Caps().Has(imap.CapMove) {
+		t.Fatal("fixture unexpectedly advertises MOVE; fallback path not exercised")
+	}
+	if err := fx.client.DeleteMessages("INBOX", []string{presentSelector(uidA)}, false); err != nil {
+		t.Fatalf("soft delete unrelated message: %v", err)
+	}
+	if err := fx.client.MoveMessages("INBOX", []string{presentSelector(uidB)}, "Archive"); err != nil {
+		t.Fatalf("fallback move other message: %v", err)
+	}
+
+	assertMessageStillInInbox(t, fx.client, uidA, uidB)
+}
+
+func assertMessageStillInInbox(t *testing.T, client *Client, wantUID, movedUID imap.UID) {
+	t.Helper()
+	inbox, err := client.ListMessages(ListOptions{Mailbox: "INBOX", Limit: 50})
+	if err != nil {
+		t.Fatalf("ListMessages INBOX: %v", err)
+	}
+	for _, message := range inbox {
+		if imap.UID(message.UID) == wantUID {
+			return
+		}
+	}
+	t.Errorf("moving UID %d expunged unrelated deleted UID %d", movedUID, wantUID)
 }
 
 // --- Security -----------------------------------------------------------
